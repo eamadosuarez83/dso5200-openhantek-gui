@@ -217,6 +217,19 @@ MainWindow::MainWindow( IDsoControl *dsoControl, DsoSettings *settings, Exporter
     addDockWidget( Qt::RightDockWidgetArea, triggerDock );
     addDockWidget( Qt::RightDockWidgetArea, spectrumDock );
 
+    // Each dock's own QGridLayout stretches its value column (comboboxes/spinboxes) to fill
+    // whatever width it is given (see e.g. VoltageDock's setColumnStretch calls); the dock content
+    // widget's size policy is Minimum, not Fixed, so on a window wider than the docks' minimum
+    // size hint - which is the common case, especially on first run before any state is saved -
+    // QMainWindow's layout hands the leftover width to the dock column too, and those stretch
+    // columns balloon into mostly-empty combo boxes, starving the actual oscilloscope plot.
+    // Cap the dock column to a fixed width so growth always goes to the central widget instead.
+    const int dockMaxWidth = 300;
+    voltageDock->setMaximumWidth( dockMaxWidth );
+    horizontalDock->setMaximumWidth( dockMaxWidth );
+    triggerDock->setMaximumWidth( dockMaxWidth );
+    spectrumDock->setMaximumWidth( dockMaxWidth );
+
     restoreGeometry( dsoSettings->mainWindowGeometry );
     restoreState( dsoSettings->mainWindowState );
 
