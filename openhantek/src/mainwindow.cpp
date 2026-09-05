@@ -36,7 +36,7 @@
 
 #include "OH_VERSION.h"
 
-MainWindow::MainWindow( HantekDsoControl *dsoControl, DsoSettings *settings, ExporterRegistry *exporterRegistry, QWidget *parent )
+MainWindow::MainWindow( IDsoControl *dsoControl, DsoSettings *settings, ExporterRegistry *exporterRegistry, QWidget *parent )
     : QMainWindow( parent ), ui( new Ui::MainWindow ), dsoSettings( settings ), exporterRegistry( exporterRegistry ) {
 
     if ( dsoSettings->scope.verboseLevel > 1 )
@@ -252,7 +252,7 @@ MainWindow::MainWindow( HantekDsoControl *dsoControl, DsoSettings *settings, Exp
         } );
 
         // disable calibration e.g. if zero signal too noisy or offset too big
-        connect( dsoControl, &HantekDsoControl::liveCalibrationError, this, [ this, scope ]() {
+        connect( dsoControl, &IDsoControl::liveCalibrationError, this, [ this, scope ]() {
             if ( verboseLevel > 2 )
                 qDebug() << "  Live calibration error";
             scope->liveCalibrationActive = false;           // set incactive first to avoid ..
@@ -279,7 +279,7 @@ MainWindow::MainWindow( HantekDsoControl *dsoControl, DsoSettings *settings, Exp
     }
 
     // Connect signals that display text in statusbar
-    connect( dsoControl, &HantekDsoControl::statusMessage, this, [ this ]( QString text, int timeout ) {
+    connect( dsoControl, &IDsoControl::statusMessage, this, [ this ]( QString text, int timeout ) {
         ui->actionManualCommand->setChecked( false );
         statusBar()->showMessage( text, timeout );
     } );
@@ -296,7 +296,7 @@ MainWindow::MainWindow( HantekDsoControl *dsoControl, DsoSettings *settings, Exp
              [ this ]() { dsoWidget->updateTimebase( dsoSettings->scope.horizontal.timebase ); } );
     connect( spectrumDock, &SpectrumDock::frequencybaseChanged, dsoWidget,
              [ this ]( double frequencybase ) { dsoWidget->updateFrequencybase( frequencybase ); } );
-    connect( dsoControl, &HantekDsoControl::samplerateCalculated, horizontalDock,
+    connect( dsoControl, &IDsoControl::samplerateCalculated, horizontalDock,
              [ this, horizontalDock, spectrumDock ]( double samplerate, unsigned oversample ) {
                  // The timebase was set, let's adapt the samplerate accordingly
                  dsoSettings->scope.horizontal.samplerate = samplerate;
@@ -312,23 +312,23 @@ MainWindow::MainWindow( HantekDsoControl *dsoControl, DsoSettings *settings, Exp
         spectrumDock->enableSpectrumDock( format == Dso::GraphFormat::TY );
     } );
 
-    connect( triggerDock, &TriggerDock::modeChanged, dsoControl, &HantekDsoControl::setTriggerMode );
+    connect( triggerDock, &TriggerDock::modeChanged, dsoControl, &IDsoControl::setTriggerMode );
     connect( triggerDock, &TriggerDock::modeChanged, dsoWidget, &DsoWidget::updateTriggerMode );
     connect( triggerDock, &TriggerDock::modeChanged, horizontalDock, &HorizontalDock::triggerModeChanged );
     connect( triggerDock, &TriggerDock::modeChanged, this, [ this ]( Dso::TriggerMode mode ) {
         ui->actionRefresh->setVisible( Dso::TriggerMode::ROLL == mode && dsoSettings->scope.horizontal.samplerate < 10e3 );
     } );
-    connect( dsoControl, &HantekDsoControl::samplerateCalculated, this, [ this ]( double samplerate ) {
+    connect( dsoControl, &IDsoControl::samplerateCalculated, this, [ this ]( double samplerate ) {
         ui->actionRefresh->setVisible( Dso::TriggerMode::ROLL == dsoSettings->scope.trigger.mode && samplerate < 10e3 );
     } );
-    connect( triggerDock, &TriggerDock::sourceChanged, dsoControl, &HantekDsoControl::setTriggerSource );
+    connect( triggerDock, &TriggerDock::sourceChanged, dsoControl, &IDsoControl::setTriggerSource );
     connect( triggerDock, &TriggerDock::sourceChanged, dsoWidget, &DsoWidget::updateTriggerSource );
-    connect( triggerDock, &TriggerDock::smoothChanged, dsoControl, &HantekDsoControl::setTriggerSmooth );
+    connect( triggerDock, &TriggerDock::smoothChanged, dsoControl, &IDsoControl::setTriggerSmooth );
     // should we send the smooth mode also to dsoWidget?
-    connect( triggerDock, &TriggerDock::slopeChanged, dsoControl, &HantekDsoControl::setTriggerSlope );
+    connect( triggerDock, &TriggerDock::slopeChanged, dsoControl, &IDsoControl::setTriggerSlope );
     connect( triggerDock, &TriggerDock::slopeChanged, dsoWidget, &DsoWidget::updateTriggerSlope );
-    connect( dsoWidget, &DsoWidget::triggerPositionChanged, dsoControl, &HantekDsoControl::setTriggerPosition );
-    connect( dsoWidget, &DsoWidget::triggerLevelChanged, dsoControl, &HantekDsoControl::setTriggerLevel );
+    connect( dsoWidget, &DsoWidget::triggerPositionChanged, dsoControl, &IDsoControl::setTriggerPosition );
+    connect( dsoWidget, &DsoWidget::triggerLevelChanged, dsoControl, &IDsoControl::setTriggerLevel );
 
     auto usedChanged = [ this, dsoControl, spec ]( ChannelID channel, unsigned channelMask ) {
         if ( channel > spec->channels )
@@ -378,7 +378,7 @@ MainWindow::MainWindow( HantekDsoControl *dsoControl, DsoSettings *settings, Exp
     connect( spectrumDock, &SpectrumDock::magnitudeChanged, dsoWidget, &DsoWidget::updateSpectrumMagnitude );
 
     // Started/stopped signals from oscilloscope
-    connect( dsoControl, &HantekDsoControl::showSamplingStatus, this, [ this ]( bool enabled ) {
+    connect( dsoControl, &IDsoControl::showSamplingStatus, this, [ this ]( bool enabled ) {
         QSignalBlocker blocker( ui->actionSampling );
         if ( enabled ) {
             ui->actionSampling->setIcon( iconPause );
@@ -391,20 +391,20 @@ MainWindow::MainWindow( HantekDsoControl *dsoControl, DsoSettings *settings, Exp
         }
         ui->actionSampling->setChecked( enabled );
     } );
-    connect( ui->actionSampling, &QAction::triggered, dsoControl, &HantekDsoControl::enableSamplingUI );
+    connect( ui->actionSampling, &QAction::triggered, dsoControl, &IDsoControl::enableSamplingUI );
     ui->actionSampling->setChecked( dsoControl->isSamplingUI() );
 
-    connect( ui->actionRefresh, &QAction::triggered, dsoControl, &HantekDsoControl::restartSampling );
+    connect( ui->actionRefresh, &QAction::triggered, dsoControl, &IDsoControl::restartSampling );
 
-    connect( dsoControl, &HantekDsoControl::samplerateLimitsChanged, horizontalDock, &HorizontalDock::setSamplerateLimits );
-    connect( dsoControl, &HantekDsoControl::samplerateSet, horizontalDock, &HorizontalDock::setSamplerateSteps );
+    connect( dsoControl, &IDsoControl::samplerateLimitsChanged, horizontalDock, &HorizontalDock::setSamplerateLimits );
+    connect( dsoControl, &IDsoControl::samplerateSet, horizontalDock, &HorizontalDock::setSamplerateSteps );
 
     // Load settings to GUI
     connect( this, &MainWindow::settingsLoaded, voltageDock, &VoltageDock::loadSettings );
     connect( this, &MainWindow::settingsLoaded, horizontalDock, &HorizontalDock::loadSettings );
     connect( this, &MainWindow::settingsLoaded, spectrumDock, &SpectrumDock::loadSettings );
     connect( this, &MainWindow::settingsLoaded, triggerDock, &TriggerDock::loadSettings );
-    connect( this, &MainWindow::settingsLoaded, dsoControl, &HantekDsoControl::applySettings );
+    connect( this, &MainWindow::settingsLoaded, dsoControl, &IDsoControl::applySettings );
     connect( this, &MainWindow::settingsLoaded, dsoWidget, &DsoWidget::updateSlidersSettings );
 
     connect( ui->actionOpen, &QAction::triggered, this, [ this, spec ]() {

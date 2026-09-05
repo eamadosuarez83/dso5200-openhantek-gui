@@ -10,7 +10,7 @@
 #include <memory>
 #include <vector>
 
-class HantekDsoControl;
+class IDsoControl;
 class ScopeDevice;
 struct libusb_context;
 
@@ -21,7 +21,7 @@ class DeviceReconnectionSupervisor : public QObject {
     Q_OBJECT
 
   public:
-    DeviceReconnectionSupervisor( libusb_context *context, HantekDsoControl *dsoControl,
+    DeviceReconnectionSupervisor( libusb_context *context, IDsoControl *dsoControl,
                                   std::unique_ptr< ScopeDevice > &currentDevice, int verboseLevel,
                                   QObject *parent = nullptr );
 
@@ -41,7 +41,7 @@ class DeviceReconnectionSupervisor : public QObject {
     void changeState( DeviceConnectionState nextState, const QString &message, int timeout = 0 );
 
     libusb_context *context;
-    HantekDsoControl *dsoControl;
+    IDsoControl *dsoControl;
     std::unique_ptr< ScopeDevice > &currentDevice;
     std::vector< std::unique_ptr< ScopeDevice > > retiredDevices;
     QTimer reconnectTimer;

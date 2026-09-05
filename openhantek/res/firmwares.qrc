@@ -6,5 +6,9 @@
         <file>firmware/dds120-firmware.hex</file>
         <file>firmware/mdso-firmware.hex</file>
         <file>firmware/isds205b-firmware.hex</file>
+        <file>firmware/dso5200x86-firmware.hex</file>
+        <file>firmware/dso5200x86-loader.hex</file>
+        <file>firmware/dso5200ax86-firmware.hex</file>
+        <file>firmware/dso5200ax86-loader.hex</file>
     </qresource>
 </RCC>

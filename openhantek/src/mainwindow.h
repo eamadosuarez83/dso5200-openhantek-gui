@@ -12,7 +12,7 @@
 #include "usb/devicereconnectionsupervisor.h"
 
 class SpectrumGenerator;
-class HantekDsoControl;
+class IDsoControl;
 class DsoSettings;
 class ExporterRegistry;
 class DsoWidget;
@@ -33,7 +33,7 @@ class MainWindow : public QMainWindow {
     Q_OBJECT
 
   public:
-    explicit MainWindow( HantekDsoControl *dsoControl, DsoSettings *dsoSettings, ExporterRegistry *exporterRegistry,
+    explicit MainWindow( IDsoControl *dsoControl, DsoSettings *dsoSettings, ExporterRegistry *exporterRegistry,
                          QWidget *parent = nullptr );
     ~MainWindow() override;
     QElapsedTimer elapsedTime;

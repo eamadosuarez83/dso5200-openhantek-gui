@@ -2,7 +2,7 @@
 
 #include "usb/devicereconnectionsupervisor.h"
 
-#include "hantekdso/hantekdsocontrol.h"
+#include "dso5200/idsocontrol.h"
 #include "usb/finddevices.h"
 #include "usb/uploadFirmware.h"
 
@@ -10,7 +10,7 @@
 #include <QDebug>
 #include <QMetaObject>
 
-DeviceReconnectionSupervisor::DeviceReconnectionSupervisor( libusb_context *context, HantekDsoControl *dsoControl,
+DeviceReconnectionSupervisor::DeviceReconnectionSupervisor( libusb_context *context, IDsoControl *dsoControl,
                                                             std::unique_ptr< ScopeDevice > &currentDevice, int verboseLevel,
                                                             QObject *parent )
     : QObject( parent ), context( context ), dsoControl( dsoControl ), currentDevice( currentDevice ), verboseLevel( verboseLevel ) {
@@ -71,7 +71,7 @@ void DeviceReconnectionSupervisor::handleDeviceDisconnected( bool expected ) {
 
     reconnectInProgress = true;
     if ( dsoControl )
-        QMetaObject::invokeMethod( dsoControl, &HantekDsoControl::parkForReconnect, Qt::BlockingQueuedConnection );
+        QMetaObject::invokeMethod( dsoControl, &IDsoControl::parkForReconnect, Qt::BlockingQueuedConnection );
 
     changeState( DeviceConnectionState::Disconnected, tr( "Oscilloscope disconnected. Waiting for reconnect..." ) );
     reconnectTimer.start();

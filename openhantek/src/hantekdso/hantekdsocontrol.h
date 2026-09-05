@@ -22,6 +22,7 @@
 #include "hantekprotocol/definitions.h"
 
 #include "dsomodel.h"
+#include "dso5200/idsocontrol.h"
 
 #include <vector>
 
@@ -51,7 +52,7 @@ struct Raw {
 
 /// \brief The DsoControl abstraction layer for %Hantek USB DSOs.
 /// TODO Please anyone, refactor this class into smaller pieces (Separation of Concerns!).
-class HantekDsoControl : public QObject {
+class HantekDsoControl : public IDsoControl {
     Q_OBJECT
     friend CapturingThread;
 
@@ -74,29 +75,29 @@ class HantekDsoControl : public QObject {
     /// Call this to start the processing.
     /// This method will call itself periodically from there on.
     /// Move this class object to an own thread and call run from there.
-    void stateMachine();
+    void stateMachine() override;
 
-    void stopStateMachine() { stateMachineRunning = false; }
+    void stopStateMachine() override { stateMachineRunning = false; }
 
-    double getSamplerate() const { return controlsettings.samplerate.current; }
+    double getSamplerate() const override { return controlsettings.samplerate.current; }
 
-    unsigned getSamplesize() const {
+    unsigned getSamplesize() const override {
         if ( controlsettings.trigger.mode == Dso::TriggerMode::ROLL )
             return SAMPLESIZE_ROLL;
         else
             return SAMPLESIZE;
     }
 
-    bool isSamplingUI() const { return samplingUI; }
+    bool isSamplingUI() const override { return samplingUI; }
 
     /// Return the associated usb device.
-    const ScopeDevice *getDevice() const;
+    const ScopeDevice *getDevice() const override;
 
     /// Return true when USB commands may access the current device.
-    bool isDeviceAvailable() const;
+    bool isDeviceAvailable() const override;
 
     /// Return the associated scope model.
-    const DSOModel *getModel() const { return model; }
+    const DSOModel *getModel() const override { return model; }
 
 
     /// \brief Sends control commands directly.
@@ -108,7 +109,7 @@ class HantekDsoControl : public QObject {
     /// </p>
     /// \param command The command as string (Has to be parsed).
     /// \return See ::Dso::ErrorCode.
-    Dso::ErrorCode stringCommand( const QString &commandString );
+    Dso::ErrorCode stringCommand( const QString &commandString ) override;
 
     void addCommand( ControlCommand *newCommand, bool pending = true );
 
@@ -122,10 +123,12 @@ class HantekDsoControl : public QObject {
     const ControlCommand *getCommand( Hantek::ControlCode code ) const { return control[ uint8_t( code ) ]; }
 
     /// \brief Stops the device.
-    void quitSampling();
+    void quitSampling() override;
 
     /// \brief Saves calibration settings e.g. to the scope's EEPROM
-    void prepareForShutdown();
+    void prepareForShutdown() override;
+
+    HantekDsoControl *asHantekDsoControl() override { return this; }
 
   private:
     std::unique_ptr< MathChannel > mathChannel;
@@ -221,119 +224,101 @@ class HantekDsoControl : public QObject {
     /// \brief If sampling is disabled, no samplesAvailable() signals are send anymore, no samples
     /// are fetched from the device and no processing takes place.
     /// \param enabled Enables/Disables sampling
-    void enableSamplingUI( bool enabled = true );
+    void enableSamplingUI( bool enabled = true ) override;
 
     /// \brief Sets the samplerate of the oscilloscope.
     /// \param samplerate The samplerate that should be met (S/s), 0.0 to restore
     /// current samplerate.
     /// \return The samplerate that has been set, 0.0 on error.
-    Dso::ErrorCode setSamplerate( double samplerate = 0.0 );
+    Dso::ErrorCode setSamplerate( double samplerate = 0.0 ) override;
 
     /// \brief Sets the time duration of one acquisition by adapting the samplerate.
     /// \param duration The record time duration that should be met (s), 0.0 to
     /// restore current record time.
     /// \return The record time duration that has been set, 0.0 on error.
-    Dso::ErrorCode setRecordTime( double duration = 0.0 );
+    Dso::ErrorCode setRecordTime( double duration = 0.0 ) override;
 
     /// \brief Enables/disables filtering of the given channel.
     /// \param channel The channel that should be set.
     /// \param used true if the channel should be sampled.
     /// \return See ::Dso::ErrorCode.
-    Dso::ErrorCode setChannelUsed( ChannelID channel, bool used );
+    Dso::ErrorCode setChannelUsed( ChannelID channel, bool used ) override;
 
     /// \brief Enables/disables inverting of the given channel.
     /// \param channel The channel that should be set.
     /// \param used true if the channel is inverted.
     /// \return See ::Dso::ErrorCode.
-    Dso::ErrorCode setChannelInverted( ChannelID channel, bool inverted );
+    Dso::ErrorCode setChannelInverted( ChannelID channel, bool inverted ) override;
 
     /// \brief Sets the gain for the given channel.
     /// Get the actual gain by specification.gainSteps[gainId]
     /// \param channel The channel that should be set.
     /// \param gain The gain that should be met (V/div).
     /// \return The gain that has been set, ::Dso::ErrorCode on error.
-    Dso::ErrorCode setProbe( ChannelID channel, double probeAttn );
+    Dso::ErrorCode setProbe( ChannelID channel, double probeAttn ) override;
 
     /// \brief Sets the probe gain for the given channel.
     /// \param channel The channel that should be set.
     /// \param probeAttn gain of probe is set.
     /// \return error code.
-    Dso::ErrorCode setGain( ChannelID channel, double gain );
+    Dso::ErrorCode setGain( ChannelID channel, double gain ) override;
 
     /// \brief Sets the coupling for the given channel.
     /// \param channel The channel that should be set.
     /// \param coupling The coupling that should be set.
     /// \return error code.
-    Dso::ErrorCode setCoupling( ChannelID channel, Dso::Coupling coupling );
+    Dso::ErrorCode setCoupling( ChannelID channel, Dso::Coupling coupling ) override;
 
     /// \brief Set the trigger mode.
     /// \return See ::Dso::ErrorCode.
-    Dso::ErrorCode setTriggerMode( Dso::TriggerMode mode );
+    Dso::ErrorCode setTriggerMode( Dso::TriggerMode mode ) override;
 
     /// \brief Set the trigger source.
     /// \param id The channel that should be used as trigger.
     /// \return See ::Dso::ErrorCode.
-    Dso::ErrorCode setTriggerSource( int channel );
+    Dso::ErrorCode setTriggerSource( int channel ) override;
 
     /// \brief Set the trigger smoothing.
     /// \param smooth The filter value.
     /// \return See ::Dso::ErrorCode.
-    Dso::ErrorCode setTriggerSmooth( int smooth );
+    Dso::ErrorCode setTriggerSmooth( int smooth ) override;
 
     /// \brief Set the trigger level.
     /// \param channel The channel that should be set.
     /// \param level The new trigger level (V).
     /// \return See ::Dso::ErrorCode.
-    Dso::ErrorCode setTriggerLevel( ChannelID channel, double level );
+    Dso::ErrorCode setTriggerLevel( ChannelID channel, double level ) override;
 
     /// \brief Set the trigger slope.
     /// \param slope The Slope that should cause a trigger.
     /// \return See ::Dso::ErrorCode.
-    Dso::ErrorCode setTriggerSlope( Dso::Slope slope );
+    Dso::ErrorCode setTriggerSlope( Dso::Slope slope ) override;
 
     /// \brief Set the trigger position.
     /// \param position The new trigger position (in s).
     /// \return The trigger position that has been set.
-    Dso::ErrorCode setTriggerPosition( double position );
+    Dso::ErrorCode setTriggerPosition( double position ) override;
 
     /// \brief Sets the calibration frequency of the oscilloscope.
     /// \param calfreq The calibration frequency.
     /// \return The tfrequency that has been set, ::Dso::ErrorCode on error.
-    Dso::ErrorCode setCalFreq( double calfreq = 0.0 );
+    Dso::ErrorCode setCalFreq( double calfreq = 0.0 ) override;
 
     /// \brief Initializes the device with the current settings.
     /// \param scope The settings for the oscilloscope.
-    void applySettings( const DsoSettingsScope *scope );
+    void applySettings( const DsoSettingsScope *scope ) override;
 
     /// Park the control object while the physical device is unavailable.
-    void parkForReconnect();
+    void parkForReconnect() override;
 
     /// Rebind the control object to a freshly opened device.
-    void rebindDevice( ScopeDevice *newScopeDevice );
+    void rebindDevice( ScopeDevice *newScopeDevice ) override;
 
     /// \brief Starts a new sampling block.
-    void restartSampling();
+    void restartSampling() override;
 
     /// \brief enable/disable offset calibration
-    void calibrateOffset( bool enable );
-
-  signals:
-    void showSamplingStatus( bool enabled );                   ///< The oscilloscope started/stopped sampling/waiting for trigger
-    void statusMessage( const QString &message, int timeout ); ///< Status message about the oscilloscope
-    void samplesAvailable( const DSOsamples *samples );        ///< New sample data is available
-
-    /// The available samplerate range has changed
-    void samplerateLimitsChanged( double minimum, double maximum );
-    /// The available samplerate for fixed samplerate devices has changed
-    void samplerateSet( int mode, QList< double > sampleSteps );
-
-    void samplerateCalculated( double samplerate, unsigned oversampling ); ///< The samplerate was newly calculated
-
-    void communicationError() const;
-
-    void deviceAvailabilityChanged( bool available );
-
-    void liveCalibrationError() const; // live calibration stopped due to noise or big offset
+    void calibrateOffset( bool enable ) override;
 };
 
 Q_DECLARE_METATYPE( DSOsamples * )

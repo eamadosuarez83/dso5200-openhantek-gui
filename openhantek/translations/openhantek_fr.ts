@@ -50,6 +50,30 @@
     </message>
 </context>
 <context>
+    <name>Dso5200DsoControl</name>
+    <message>
+        <location filename="../src/dso5200/dso5200dsocontrol.cpp" line="128"/>
+        <source>The DSO-5200/5200A has no live EEPROM calibration.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../src/dso5200/dso5200dsocontrol.cpp" line="491"/>
+        <source>Could not read channel limits from the oscilloscope: %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../src/dso5200/dso5200dsocontrol.cpp" line="527"/>
+        <location filename="../src/dso5200/dso5200dsocontrol.cpp" line="543"/>
+        <source>Reading sample data failed: %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../src/dso5200/dso5200dsocontrol.cpp" line="649"/>
+        <source>Could not read the capture state</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
     <name>DsoConfigAnalysisPage</name>
     <message>
         <source>Rectangular</source>
@@ -2614,98 +2638,98 @@
 <context>
     <name>main</name>
     <message>
-        <location filename="../src/main.cpp" line="127"/>
-        <location filename="../src/main.cpp" line="168"/>
+        <location filename="../src/main.cpp" line="132"/>
+        <location filename="../src/main.cpp" line="173"/>
         <source>Show the international interface, do not translate</source>
         <translation>Afficher l&apos;interface internationale, ne pas traduire</translation>
     </message>
     <message>
-        <location filename="../src/main.cpp" line="151"/>
+        <location filename="../src/main.cpp" line="156"/>
         <source>Load config file</source>
         <translation>Charger le fichier de configuration</translation>
     </message>
     <message>
-        <location filename="../src/main.cpp" line="152"/>
+        <location filename="../src/main.cpp" line="157"/>
         <source>File</source>
         <translation>Fichier</translation>
     </message>
     <message>
-        <location filename="../src/main.cpp" line="155"/>
+        <location filename="../src/main.cpp" line="160"/>
         <source>Demo mode without scope HW</source>
         <translation>Mode démo sans équipement</translation>
     </message>
     <message>
-        <location filename="../src/main.cpp" line="158"/>
+        <location filename="../src/main.cpp" line="163"/>
         <source>Use OpenGL ES instead of OpenGL</source>
         <translation>Utilisez OpenGL ES à la place de OpenGL</translation>
     </message>
     <message>
-        <location filename="../src/main.cpp" line="160"/>
+        <location filename="../src/main.cpp" line="165"/>
         <source>Do not connect automatically</source>
         <translation>Ne pas connecter automatiquement</translation>
     </message>
     <message>
-        <location filename="../src/main.cpp" line="163"/>
+        <location filename="../src/main.cpp" line="168"/>
         <source>Force OpenGL SL version 1.20</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../src/main.cpp" line="165"/>
+        <location filename="../src/main.cpp" line="170"/>
         <source>Force OpenGL SL version 1.50</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../src/main.cpp" line="170"/>
+        <location filename="../src/main.cpp" line="175"/>
         <source>Define the system font</source>
         <translation>Définir la fonte du système</translation>
     </message>
     <message>
-        <location filename="../src/main.cpp" line="171"/>
+        <location filename="../src/main.cpp" line="176"/>
         <source>Font</source>
         <translation>Font</translation>
     </message>
     <message>
-        <location filename="../src/main.cpp" line="175"/>
+        <location filename="../src/main.cpp" line="180"/>
         <source>Set the font size (default = %1, 0: automatic from dpi)</source>
         <translation>Définir la taille de la fonte (par défaut = %1, 0 : automatique à partir des dpi)</translation>
     </message>
     <message>
-        <location filename="../src/main.cpp" line="177"/>
+        <location filename="../src/main.cpp" line="182"/>
         <source>Size</source>
         <translation>Taille</translation>
     </message>
     <message>
-        <location filename="../src/main.cpp" line="181"/>
+        <location filename="../src/main.cpp" line="186"/>
         <source>Set the font weight (default = %1)</source>
         <translation>Définir le poids de la fonte (par défaut = %1)</translation>
     </message>
     <message>
-        <location filename="../src/main.cpp" line="183"/>
+        <location filename="../src/main.cpp" line="188"/>
         <source>Weight</source>
         <translation>Poids</translation>
     </message>
     <message>
-        <location filename="../src/main.cpp" line="186"/>
+        <location filename="../src/main.cpp" line="191"/>
         <source>Set the font condensed value (default = %1)</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../src/main.cpp" line="187"/>
+        <location filename="../src/main.cpp" line="192"/>
         <source>Condensed</source>
         <translation>Condensé</translation>
     </message>
     <message>
-        <location filename="../src/main.cpp" line="190"/>
+        <location filename="../src/main.cpp" line="195"/>
         <source>Reset persistent settings, start with default</source>
         <translation>Réinitialisation des paramètres persistants, démarrage par défaut</translation>
     </message>
     <message>
-        <location filename="../src/main.cpp" line="193"/>
+        <location filename="../src/main.cpp" line="198"/>
         <source>Verbose tracing of program startup, ui and processing steps</source>
         <translation>Traçage verbeux du démarrage du programme, de l&apos;interface utilisateur et des étapes de traitement</translation>
     </message>
     <message>
-        <location filename="../src/main.cpp" line="194"/>
+        <location filename="../src/main.cpp" line="199"/>
         <source>Level</source>
         <translation>Niveau</translation>
     </message>

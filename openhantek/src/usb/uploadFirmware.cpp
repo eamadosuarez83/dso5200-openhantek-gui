@@ -32,12 +32,23 @@ bool UploadFirmware::startUpload( ScopeDevice *scopeDevice ) {
         return false;
     }
 
+    const bool twoStage = scopeDevice->getModel()->twoStageFirmware;
+
     // Write firmware from resources to temp files
     QFile firmwareRes( QString( ":/firmware/%1-firmware.hex" ).arg( scopeDevice->getModel()->firmwareToken ) );
     auto temp_firmware_path = std::unique_ptr< QTemporaryFile >( QTemporaryFile::createNativeFile( firmwareRes ) );
     if ( !temp_firmware_path )
         return false;
     temp_firmware_path->open();
+
+    std::unique_ptr< QTemporaryFile > temp_loader_path;
+    if ( twoStage ) {
+        QFile loaderRes( QString( ":/firmware/%1-loader.hex" ).arg( scopeDevice->getModel()->firmwareToken ) );
+        temp_loader_path = std::unique_ptr< QTemporaryFile >( QTemporaryFile::createNativeFile( loaderRes ) );
+        if ( !temp_loader_path )
+            return false;
+        temp_loader_path->open();
+    }
 
 #ifdef Q_OS_LINUX
     // Detach kernel driver, reported to lead to an error on FreeBSD, MacOSX and Windows
@@ -57,9 +68,21 @@ bool UploadFirmware::startUpload( ScopeDevice *scopeDevice ) {
         return false;
     }
 
-    // Write firmware into internal RAM using first stage loader built into EZ-USB hardware
     // use local 8bit encoding (utf8 for Linux, iso-8859-x for Windows)
-    status = ezusb_load_ram( handle, temp_firmware_path->fileName().toLocal8Bit().constData(), FX_TYPE_FX2LP, 0 );
+    if ( twoStage ) {
+        // Plain FX2 (e.g. DSO-5200/5200A): stage 0 is a small loader, stage 1 the real firmware.
+        status = ezusb_load_ram( handle, temp_loader_path->fileName().toLocal8Bit().constData(), FX_TYPE_FX2, 0 );
+        if ( status != LIBUSB_SUCCESS ) {
+            errorMessage = TR( "Writing the loader firmware failed: %1" ).arg( libusb_error_name( status ) );
+            libusb_release_interface( handle, 0 );
+            libusb_close( handle );
+            return false;
+        }
+        status = ezusb_load_ram( handle, temp_firmware_path->fileName().toLocal8Bit().constData(), FX_TYPE_FX2, 1 );
+    } else {
+        // Write firmware into internal RAM using first stage loader built into EZ-USB hardware
+        status = ezusb_load_ram( handle, temp_firmware_path->fileName().toLocal8Bit().constData(), FX_TYPE_FX2LP, 0 );
+    }
     if ( status != LIBUSB_SUCCESS ) {
         errorMessage = TR( "Writing the main firmware failed: %1" ).arg( libusb_error_name( status ) );
         libusb_release_interface( handle, 0 );

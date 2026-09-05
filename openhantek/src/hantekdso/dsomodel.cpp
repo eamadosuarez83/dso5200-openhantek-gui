@@ -5,9 +5,9 @@
 
 DSOModel::DSOModel( int id, unsigned vendorID, unsigned productID, unsigned vendorIDnoFirmware, unsigned productIDnoFirmware,
                     unsigned firmwareVersion, const QString &firmwareToken, const QString &name,
-                    const Dso::ControlSpecification &&specification )
+                    const Dso::ControlSpecification &&specification, bool twoStageFirmware )
     : ID( id ), vendorID( vendorID ), productID( productID ), vendorIDnoFirmware( vendorIDnoFirmware ),
       productIDnoFirmware( productIDnoFirmware ), firmwareVersion( firmwareVersion ), firmwareToken( firmwareToken ), name( name ),
-      specification( specification ) {
+      twoStageFirmware( twoStageFirmware ), specification( specification ) {
     ModelRegistry::get()->add( this );
 }

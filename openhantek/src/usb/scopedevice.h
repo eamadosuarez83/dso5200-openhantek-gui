@@ -159,23 +159,6 @@ class ScopeDevice : public QObject {
      */
     inline void overwriteInPacketLength( unsigned len ) { inPacketLength = len; }
 
-  protected:
-    int claimInterface( const libusb_interface_descriptor *interfaceDescriptor );
-
-    // Device model data
-    DSOModel *model;
-
-    // Libusb specific variables
-    struct libusb_device_descriptor descriptor;
-    libusb_device *device; ///< The USB handle for the oscilloscope
-    libusb_device_handle *handle = nullptr;
-    unsigned findIteration;
-    const UniqueUSBid uniqueUSBdeviceID;
-    int nInterface;
-    unsigned outPacketLength; ///< Packet length for the OUT endpoint
-    unsigned inPacketLength;  ///< Packet length for the IN endpoint
-
-  private:
     /// \brief Bulk transfer to/from the oscilloscope.
     /// \param endpoint Endpoint number, also sets the direction of the transfer.
     /// \param data Buffer for the sent/received data.
@@ -183,6 +166,10 @@ class ScopeDevice : public QObject {
     /// \param attempts The number of attempts, that are done on timeouts.
     /// \param timeout The timeout in ms.
     /// \return Number of transferred bytes on success, libusb error code on error.
+    /// Public (unlike upstream OpenHantek6022, where every currently supported model speaks
+    /// only CONTROL_* + bulkReadMulti() and this stayed private): the DSO-5200/5200A protocol
+    /// (Dso5200DsoControl) needs genuine bulk OUT command writes and a single bulk IN read for
+    /// the capture-state response, which controlWrite()/controlRead()/bulkReadMulti() don't cover.
     int bulkTransfer( unsigned char endpoint, const unsigned char *data, unsigned int length, int attempts = HANTEK_ATTEMPTS,
                       unsigned int timeout = HANTEK_TIMEOUT );
 
@@ -204,6 +191,23 @@ class ScopeDevice : public QObject {
         return bulkTransfer( HANTEK_EP_IN, command->data(), command->size(), attempts );
     }
 
+  protected:
+    int claimInterface( const libusb_interface_descriptor *interfaceDescriptor );
+
+    // Device model data
+    DSOModel *model;
+
+    // Libusb specific variables
+    struct libusb_device_descriptor descriptor;
+    libusb_device *device; ///< The USB handle for the oscilloscope
+    libusb_device_handle *handle = nullptr;
+    unsigned findIteration;
+    const UniqueUSBid uniqueUSBdeviceID;
+    int nInterface;
+    unsigned outPacketLength; ///< Packet length for the OUT endpoint
+    unsigned inPacketLength;  ///< Packet length for the IN endpoint
+
+  private:
     bool realHW = true;
     bool stopTransfer = false;
     bool disconnected = true;

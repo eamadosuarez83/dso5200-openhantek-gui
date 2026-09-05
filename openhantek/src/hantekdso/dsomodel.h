@@ -27,6 +27,10 @@ class DSOModel {
     /// The firmwareToken is the "devicename" of the pattern above.
     const QString firmwareToken;
     const QString name; ///< User visible name. Does not need internationalisation/translation.
+    /// Some EZ-USB targets (plain FX2, e.g. the DSO-5200/5200A) need a two-stage upload: a small
+    /// loader first, then the real firmware, both named "<firmwareToken>-{loader,firmware}.hex".
+    /// FX2LP targets (the 6022 family) only need the single-stage "<firmwareToken>-firmware.hex".
+    const bool twoStageFirmware;
 
   protected:
     Dso::ControlSpecification specification;
@@ -36,7 +40,7 @@ class DSOModel {
     virtual void applyRequirements( HantekDsoControl * ) const = 0;
     DSOModel( int id, unsigned vendorID, unsigned productID, unsigned vendorIDnoFirmware, unsigned productIDnoFirmware,
               unsigned firmwareVersion, const QString &firmwareToken, const QString &name,
-              const Dso::ControlSpecification &&specification );
+              const Dso::ControlSpecification &&specification, bool twoStageFirmware = false );
     virtual ~DSOModel() = default;
     /// Return the device specifications
     inline const Dso::ControlSpecification *spec() const { return &specification; }

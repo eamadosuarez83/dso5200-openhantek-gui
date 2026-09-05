@@ -38,6 +38,11 @@
 #include "usb/devicereconnectionsupervisor.h"
 #include "usb/scopedevice.h"
 
+// DSO-5200/5200A control (replaces HantekDsoControl for that model - see dso5200/idsocontrol.h)
+#include "dso5200/dso5200dsocontrol.h"
+#include "dso5200/idsocontrol.h"
+#include "dso5200/modelDSO5200.h"
+
 // Post processing
 #include "post/graphgenerator.h"
 #include "post/postprocessing.h"
@@ -390,16 +395,28 @@ int main( int argc, char *argv[] ) {
                  << "create DSO control thread";
     QThread dsoControlThread;
     dsoControlThread.setObjectName( "dsoControlThread" );
-    HantekDsoControl dsoControl( scopeDevice.get(), model, verboseLevel );
+
+    // The DSO-5200/5200A uses its own protocol and capture state machine (see
+    // dso5200/dso5200dsocontrol.h for why this isn't just another HantekDsoControl model);
+    // every other supported model keeps using the original HantekDsoControl unchanged.
+    const bool isDso5200 = model->ID == ModelDSO5200::ID || model->ID == ModelDSO5200A::ID;
+    std::unique_ptr< IDsoControl > dsoControlPtr;
+    if ( isDso5200 )
+        dsoControlPtr =
+            std::unique_ptr< IDsoControl >( new Dso5200DsoControl( scopeDevice.get(), model, verboseLevel ) );
+    else
+        dsoControlPtr = std::unique_ptr< IDsoControl >( new HantekDsoControl( scopeDevice.get(), model, verboseLevel ) );
+    IDsoControl &dsoControl = *dsoControlPtr;
+
     dsoControl.moveToThread( &dsoControlThread );
-    QObject::connect( &dsoControlThread, &QThread::started, &dsoControl, &HantekDsoControl::stateMachine );
+    QObject::connect( &dsoControlThread, &QThread::started, &dsoControl, &IDsoControl::stateMachine );
     std::unique_ptr< DeviceReconnectionSupervisor > reconnectSupervisor;
     if ( context && scopeDevice && scopeDevice->isRealHW() ) {
         reconnectSupervisor = std::unique_ptr< DeviceReconnectionSupervisor >(
             new DeviceReconnectionSupervisor( context, &dsoControl, scopeDevice, verboseLevel, &openHantekApplication ) );
         QObject::connect( QCoreApplication::instance(), &QCoreApplication::aboutToQuit, reconnectSupervisor.get(),
                           [ &reconnectSupervisor ]() { reconnectSupervisor->setClosing(); } );
-        QObject::connect( &dsoControl, &HantekDsoControl::communicationError, reconnectSupervisor.get(),
+        QObject::connect( &dsoControl, &IDsoControl::communicationError, reconnectSupervisor.get(),
                           [ &reconnectSupervisor ]() { reconnectSupervisor->handleDeviceDisconnected( false ); },
                           Qt::QueuedConnection );
     }
@@ -445,7 +462,7 @@ int main( int argc, char *argv[] ) {
     postProcessing.registerProcessor( &graphGenerator );
 
     postProcessing.moveToThread( &postProcessingThread );
-    QObject::connect( &dsoControl, &HantekDsoControl::samplesAvailable, &postProcessing, &PostProcessing::input );
+    QObject::connect( &dsoControl, &IDsoControl::samplesAvailable, &postProcessing, &PostProcessing::input );
     QObject::connect( &postProcessing, &PostProcessing::processingFinished, &exportRegistry, &ExporterRegistry::input,
                       Qt::DirectConnection );
 
@@ -533,8 +550,15 @@ int main( int argc, char *argv[] ) {
     dsoControl.enableSamplingUI();
     postProcessingThread.start();
     dsoControlThread.start();
-    CapturingThread capturingThread( &dsoControl ); // low level capture in separate thread
-    capturingThread.start();
+    // CapturingThread only understands HantekDsoControl's internals (its raw sample layout and
+    // control[]/pending-command bookkeeping are 6022-specific, see hantekdso/capturing.cpp) -
+    // Dso5200DsoControl instead runs its own capture polling loop internally, started from its
+    // constructor, so there is nothing extra to start here for that model.
+    std::unique_ptr< CapturingThread > capturingThread;
+    if ( HantekDsoControl *legacyControl = dsoControl.asHantekDsoControl() ) {
+        capturingThread = std::unique_ptr< CapturingThread >( new CapturingThread( legacyControl ) );
+        capturingThread->start();
+    }
 
     if ( verboseLevel )
         qDebug() << startupTime.elapsed() << "ms:"
@@ -562,8 +586,10 @@ int main( int argc, char *argv[] ) {
     // wait 2 * record time (delay is ms) for dso to finish
     unsigned waitForDso = unsigned( 2000 * dsoControl.getSamplesize() / dsoControl.getSamplerate() );
     waitForDso = qMax( waitForDso, 10000U ); // wait for at least 10 s
-    capturingThread.requestInterruption();
-    capturingThread.wait( waitForDso );
+    if ( capturingThread ) {
+        capturingThread->requestInterruption();
+        capturingThread->wait( waitForDso );
+    }
     if ( verboseLevel < 2 )
         std::cerr << "has "; // 2nd part
 
