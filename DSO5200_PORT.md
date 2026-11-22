@@ -36,6 +36,11 @@ recompilar.
   masa) y el canal se dibuja en 0 V. Arranque en DC. Hasta esa fecha todo se medía en AC sin
   saberlo.
 
+- **Ver un solo canal**: los dos canales quedan siempre activos en el aparato y desmarcar uno en
+  la GUI solo lo oculta (22-nov-2026). Con un solo canal activo en el hardware, el aparato entrega
+  ese canal en la posición del búfer de CH1 (con otro cero y otra ganancia) y el núcleo lo leía en
+  la suya: la traza se caía. Pendiente arreglarlo en `dso5200basic` (comando `channel 1|2` de la CLI).
+
 ## Pendiente
 
 - Lo que el núcleo aún no ofrece se rechaza con un aviso en la barra de estado: disparo por CH2,
