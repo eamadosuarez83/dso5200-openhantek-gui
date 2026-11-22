@@ -15,11 +15,26 @@ if (GIT_EXECUTABLE AND EXISTS "${CMAKE_SOURCE_DIR}/.git")
         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
         OUTPUT_VARIABLE VERSION
         OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET
     )
+    # Un clon sin tags (p. ej. el de GitHub de este fork, que no sube los del upstream, usado por
+    # el PKGBUILD) no tiene nada que describir: se usa 0.0.0-<hash> en vez de abortar la configuración.
+    if( NOT VERSION )
+        execute_process(
+            COMMAND ${GIT_EXECUTABLE} describe --always --dirty
+            WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+            OUTPUT_VARIABLE GIT_HASH
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+        )
+        set( VERSION "0.0.0-${GIT_HASH}" )
+        set( NO_GIT_TAGS TRUE )
+    endif()
     # devdrop or release?
     string(FIND ${VERSION} "devdrop-0-g" DEVDROP_POS)
     string(FIND ${VERSION} "-0-g" ZERO_POS)
-    if( ${DEVDROP_POS} EQUAL 0 ) # "x.y.z-p-gxxxxxxx(-dirty)-devdrop"
+    if( NO_GIT_TAGS )
+        # VERSION ya está fijada arriba
+    elseif( ${DEVDROP_POS} EQUAL 0 ) # "x.y.z-p-gxxxxxxx(-dirty)-devdrop"
         execute_process(
             COMMAND ${GIT_EXECUTABLE} describe --long --dirty
             WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}

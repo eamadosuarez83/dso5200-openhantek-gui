@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=OpenHantek DSO-5200
+GenericName=Digital Storage Oscilloscope
+GenericName[es]=Osciloscopio de almacenamiento digital
+Comment=DSO software for the Hantek DSO-5200/5200A USB oscilloscope
+Comment[es]=Software para el osciloscopio USB Hantek DSO-5200/5200A
+Exec=dso5200-openhantek
+Icon=dso5200-openhantek
+Terminal=false
+Categories=Development;Engineering;Electronics;

@@ -1,0 +1,77 @@
+# Paquete para Manjaro/Arch: GUI OpenHantek para el Hantek DSO-5200/5200A, con el núcleo del
+# protocolo de dso5200basic (CLI y visor incluidos).
+#
+# Construir e instalar (como usuario normal, no root):
+#   cd packaging/manjaro && makepkg -si
+# Ver README.md en esta carpeta.
+
+pkgname=dso5200-openhantek
+pkgver=r0
+pkgrel=1
+pkgdesc="Software de osciloscopio para el Hantek DSO-5200/5200A: GUI (fork de OpenHantek6022) y CLI dso5200basic"
+arch=('x86_64')
+url="https://github.com/eamadosuarez83/dso5200-openhantek-gui"
+# GUI: GPL-3.0 (OpenHantek6022). Núcleo dso5200basic: GPL-2.0-or-later.
+license=('GPL-3.0-or-later' 'GPL-2.0-or-later')
+depends=('qt6-base' 'libusb' 'fftw' 'hicolor-icon-theme')
+makedepends=('git' 'cmake' 'qt6-tools')
+optdepends=('python-matplotlib: visor en vivo dso5200-viewer para la CLI'
+            'tk: backend TkAgg que usa dso5200-viewer')
+# Las dos carpetas deben ser hermanas: la GUI compila el núcleo desde ../../dso5200basic.
+source=("dso5200gui::git+https://github.com/eamadosuarez83/dso5200-openhantek-gui.git#branch=main"
+        "dso5200basic::git+https://github.com/eamadosuarez83/dso5200-cli.git#branch=main"
+        "dso5200-openhantek.desktop")
+sha256sums=('SKIP'
+            'SKIP'
+            'SKIP')
+
+pkgver() {
+    # r<commits GUI>.<hash GUI>.b<hash núcleo>: cambia si cambia cualquiera de los dos repos.
+    local gui basic
+    gui=$(cd dso5200gui && printf "r%s.%s" "$(git rev-list --count HEAD)" "$(git rev-parse --short=7 HEAD)")
+    basic=$(cd dso5200basic && git rev-parse --short=7 HEAD)
+    printf "%s.b%s" "$gui" "$basic"
+}
+
+build() {
+    # Release: es la configuración probada contra el aparato (la GUI añade -fno-rtti en Release).
+    cmake -S dso5200gui -B build-gui -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr \
+        -DDSO5200BASIC_DIR="$srcdir/dso5200basic" -Wno-dev
+    cmake --build build-gui
+
+    cmake -S dso5200basic -B build-cli -DCMAKE_BUILD_TYPE=Release -Wno-dev
+    cmake --build build-cli
+}
+
+package() {
+    # GUI (el firmware va embebido en el ejecutable). Nombre propio para no chocar con openhantek6022.
+    install -Dm755 build-gui/openhantek/OpenHantek "$pkgdir/usr/bin/dso5200-openhantek"
+    install -Dm644 dso5200-openhantek.desktop "$pkgdir/usr/share/applications/dso5200-openhantek.desktop"
+    install -Dm644 dso5200gui/openhantek/res/images/OpenHantek.svg \
+        "$pkgdir/usr/share/icons/hicolor/scalable/apps/dso5200-openhantek.svg"
+    install -Dm644 dso5200gui/openhantek/res/images/OpenHantek.png \
+        "$pkgdir/usr/share/icons/hicolor/48x48/apps/dso5200-openhantek.png"
+
+    # CLI: el binario busca el firmware junto a sí mismo por omisión; el lanzador le pasa la ruta.
+    install -Dm755 build-cli/dso5200basic "$pkgdir/usr/lib/dso5200basic/dso5200basic"
+    install -Dm644 -t "$pkgdir/usr/share/dso5200basic/firmware" dso5200basic/firmware/*.hex
+    install -Dm755 /dev/stdin "$pkgdir/usr/bin/dso5200basic" <<'SH'
+#!/bin/sh
+# Un --firmware-dir del usuario, al ir después, tiene prioridad.
+exec /usr/lib/dso5200basic/dso5200basic --firmware-dir /usr/share/dso5200basic/firmware "$@"
+SH
+    install -Dm644 dso5200basic/viewer/dso_viewer.py "$pkgdir/usr/share/dso5200basic/viewer/dso_viewer.py"
+    install -Dm755 /dev/stdin "$pkgdir/usr/bin/dso5200-viewer" <<'SH'
+#!/bin/sh
+exec python3 /usr/share/dso5200basic/viewer/dso_viewer.py "$@"
+SH
+
+    # Acceso USB sin root (uaccess). El número 60 importa: debe ir antes de 73-seat-late.rules.
+    # pacman recarga las reglas solo (35-systemd-udev-reload.hook); hay que reconectar el aparato.
+    install -Dm644 dso5200basic/60-dso5200.rules "$pkgdir/usr/lib/udev/rules.d/60-dso5200.rules"
+
+    # Documentación
+    install -Dm644 dso5200gui/DSO5200_PORT.md "$pkgdir/usr/share/doc/$pkgname/DSO5200_PORT.md"
+    install -Dm644 dso5200basic/README.md "$pkgdir/usr/share/doc/$pkgname/dso5200basic-README.md"
+    install -Dm644 dso5200basic/MANUAL.md "$pkgdir/usr/share/doc/$pkgname/dso5200basic-MANUAL.md"
+}
