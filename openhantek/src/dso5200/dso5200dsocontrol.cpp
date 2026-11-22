@@ -1,703 +1,362 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 //
-// See dso5200dsocontrol.h. The samplerate/gain/trigger arithmetic and the
-// 10-bit sample unpacking below are ported near-verbatim from dso5200basic's
-// Dso5200Control (src/device/dso5200.cpp), validated against real DSO-5200A
-// hardware; see that project's docs/GUIA_ESTUDIO.md for the reverse
-// engineering history behind each constant and threshold below.
+// Ver dso5200dsocontrol.h. Toda la lógica de protocolo está en dso5200basic (vía Dso5200Core).
 
 #include "dso5200dsocontrol.h"
 
-#include <algorithm>
+#include <QReadLocker>
 #include <cmath>
-#include <cstring>
+#include <cstdio>
+#include <cstdlib>
+#include <QWriteLocker>
 
-#ifdef Q_OS_FREEBSD
-#include <libusb.h>
-#else
-#include <libusb-1.0/libusb.h>
-#endif
-
-#include "hantekdso/dsomodel.h"
-#include "protocol/states.h"
+#include "dsomodel.h"
 #include "usb/scopedevice.h"
-#include "viewconstants.h"
-
-using namespace Hantek5200;
-
-namespace {
-struct TimebaseEntry {
-    uint8_t fast;
-    uint16_t slow;
-};
-
-// See dso5200basic/src/device/dso5200.cpp for the full derivation: these register pairs were
-// cross-checked against sigrok's hantek-dso driver and github.com/Blokkendoos/HantekDSO, then
-// corrected (fast=2, not 4) after testing against real hardware showed the mathematically
-// equivalent (fast=4) encoding produces only a single captured edge instead of a full window.
-constexpr TimebaseEntry kSlowTimebaseTable[] = {
-    { 3, 0xFFFF }, { 2, 0xFFFD }, { 2, 0xFFF8 }, { 2, 0xFFE9 }, { 2, 0xFFCF }, { 2, 0xFF9D },
-    { 2, 0xFF08 }, { 2, 0xFE0E }, { 2, 0xFC1A }, { 2, 0xF63E }, { 2, 0xEC7A }, { 2, 0xD8F2 },
-};
-constexpr unsigned kSlowTimebaseTableSize = sizeof( kSlowTimebaseTable ) / sizeof( kSlowTimebaseTable[ 0 ] );
-} // namespace
-
-// gainId%3 pattern (with the gainId==0 exception) confirmed against a 2010 OpenHantek6022 fix
-// (commit b935f4e, "Mostly DSO-5200 bugfixes, thanks to Ash"); voltsPerDiv values reconstructed
-// from real relay click points + the official Windows software's USB traffic (dso5200basic
-// docs/GUIA_ESTUDIO.md, "Octavo caso real").
-const Dso5200DsoControl::GainStep Dso5200DsoControl::kGain[ 9 ] = {
-    { 1, 0.02 }, { 1, 0.05 }, { 0, 0.1 }, { 0, 0.2 }, { 1, 0.5 }, { 0, 1.0 }, { 0, 2.0 }, { 1, 5.0 }, { 0, 10.0 },
-};
-
-const unsigned short Dso5200DsoControl::kVoltageLimit[ 9 ] = { 184, 368, 454, 908, 368, 454, 908, 368, 454 };
 
 Dso5200DsoControl::Dso5200DsoControl( ScopeDevice *scopeDevice, const DSOModel *model, int verboseLevel )
     : device( scopeDevice ), model( model ), verboseLevel( verboseLevel ) {
-    result.data.resize( kChannels + 1 ); // CH1, CH2, (empty) MATH slot - no math channel on this device
-
-    retrieveChannelLevelData();
-
-    // The DSO-5200's ETsrBits.triggerSource field uses an inverted channel mapping - left at its
-    // zero-initialized default the trigger comparator watches CH2 instead of CH1. trigger.source
-    // is fixed to channel 0 here at startup, same as dso5200basic.
-    triggerCommand.setTriggerSource( (uint8_t)( 1 - trigger.source ) );
-    bulkCommand( triggerCommand );
-
-    doSetChannelUsed( 0, true );
-    doSetChannelUsed( 1, true );
-    doSetGain( 0, kGain[ voltage[ 0 ].gain ].voltsPerDiv );
-    doSetGain( 1, kGain[ voltage[ 1 ].gain ].voltsPerDiv );
-    triggerCommand.setTriggerSlope( trigger.slope );
-    bulkCommand( triggerCommand );
-
-    bufferCommand.setUsedPre( DTriggerPositionUsed::ON );
-    bufferCommand.setUsedPost( DTriggerPositionUsed::ON );
-    bufferCommand.setRecordLength( 1 );
-    bulkCommand( bufferCommand );
-
-    doSetRecordTime( targetTimebaseSeconds );
-
-    running = true;
-    worker = std::thread( &Dso5200DsoControl::threadMain, this );
+    result.data.resize( kChannels + 1 ); // CH1, CH2 y el hueco del canal MATH (no existe en este aparato)
+    openCore();
 }
 
-Dso5200DsoControl::~Dso5200DsoControl() {
-    running = false;
-    if ( worker.joinable() )
-        worker.join();
+Dso5200DsoControl::~Dso5200DsoControl() { core.reset(); }
+
+bool Dso5200DsoControl::openCore() {
+    core.reset();
+    if ( !device || !model )
+        return false;
+
+    // El núcleo abre su propia conexión al mismo dispositivo USB; la de la GUI se cierra antes porque
+    // el interfaz solo puede reclamarlo una conexión. expected=true: no es una desconexión real, el
+    // supervisor de reconexión la ignora.
+    libusb_device *usbDevice = device->getUSBDevice();
+    device->disconnectFromDevice( true );
+
+    core.reset( new Dso5200Core( usbDevice, (long)model->vendorID, (long)model->productID, model->name.toStdString(),
+                                 verboseLevel > 2 ) );
+    core->onFrame = [ this ]( const Dso5200Core::Frame &frame ) { onCoreFrame( frame ); };
+    core->onDisconnected = [ this ]() { emit communicationError(); };
+
+    std::string errorMessage;
+    if ( !core->open( errorMessage ) ) {
+        emit statusMessage( tr( "DSO-5200: no se pudo abrir el dispositivo: %1" ).arg( QString::fromStdString( errorMessage ) ),
+                            0 );
+        core.reset();
+        return false;
+    }
+
+    // Reaplicar el estado conocido (al arrancar son los valores por omisión; tras una reconexión, lo
+    // último que pidió la GUI).
+    core->setTimebase( timebaseSeconds );
+    for ( ChannelID ch = 0; ch < kChannels; ++ch ) {
+        core->setChannelEnabled( ch, channel[ ch ].used );
+        applyCoupling( ch );
+        applyChannel( ch );
+    }
+    // Depuración: DSO5200_CAL=1|2 vuelca a stderr, por frame, las estadísticas crudas del ADC del
+    // núcleo y las de las muestras que se entregan a la GUI, para comparar con la CLI.
+    if ( const char *cal = std::getenv( "DSO5200_CAL" ) ) {
+        debugChannel = std::atoi( cal ) - 1;
+        if ( debugChannel >= 0 && debugChannel < (int)kChannels )
+            core->setRawStats( true, (unsigned)debugChannel );
+    }
+    if ( samplingUI )
+        core->start();
+    return true;
 }
 
-const ScopeDevice *Dso5200DsoControl::getDevice() const { return device; }
+bool Dso5200DsoControl::isDeviceAvailable() const { return coreReady(); }
 
-bool Dso5200DsoControl::isDeviceAvailable() const { return device != nullptr && device->isConnected(); }
+void Dso5200DsoControl::applyChannel( ChannelID ch ) {
+    if ( !coreReady() || ch >= kChannels )
+        return;
+    double voltsPerDivAtInput;
+    {
+        std::lock_guard< std::mutex > lock( settingsMutex );
+        voltsPerDivAtInput = channel[ ch ].gain / channel[ ch ].probeAttn;
+    }
+    core->setVoltsPerDiv( ch, voltsPerDivAtInput );
+    if ( ch == 0 )
+        applyTriggerLevel(); // el nivel del núcleo va en voltios en la entrada: depende de la sonda de CH1
+}
 
-void Dso5200DsoControl::setLastError( const QString &message ) {
-    std::lock_guard< std::mutex > lock( statusMutex );
-    lastError = message;
-    emit statusMessage( message, 5000 );
+void Dso5200DsoControl::applyCoupling( ChannelID ch ) {
+    if ( !coreReady() || ch >= kChannels )
+        return;
+    Dso::Coupling coupling;
+    {
+        std::lock_guard< std::mutex > lock( settingsMutex );
+        coupling = channel[ ch ].coupling;
+    }
+    Dso5200Core::Coupling mode = Dso5200Core::Coupling::DC;
+    if ( coupling == Dso::Coupling::AC )
+        mode = Dso5200Core::Coupling::AC;
+    else if ( coupling == Dso::Coupling::GND )
+        mode = Dso5200Core::Coupling::GND;
+    core->setCoupling( ch, mode );
+}
+
+void Dso5200DsoControl::applyTriggerLevel() {
+    if ( !coreReady() )
+        return;
+    double levelAtInput;
+    {
+        std::lock_guard< std::mutex > lock( settingsMutex );
+        levelAtInput = triggerLevel / channel[ 0 ].probeAttn;
+    }
+    core->setTriggerLevel( levelAtInput );
+}
+
+void Dso5200DsoControl::onCoreFrame( const Dso5200Core::Frame &frame ) {
+    ChannelSettings settings[ kChannels ];
+    {
+        std::lock_guard< std::mutex > lock( settingsMutex );
+        for ( unsigned ch = 0; ch < kChannels; ++ch )
+            settings[ ch ] = channel[ ch ];
+    }
+
+    const bool samplerateChanged = samplerateDirty.exchange( false ) || frame.samplerate != samplerate;
+    {
+        QWriteLocker locker( &result.lock );
+        for ( auto &v : result.data )
+            v.clear();
+        result.samplerate = frame.samplerate;
+        result.clipped = 0;
+        result.liveTrigger = true;
+        result.freeRunning = false;
+        result.tag = frame.frameNumber;
+        size_t samplesPerChannel = 0;
+        for ( const Dso5200Core::Channel &in : frame.channels ) {
+            if ( in.id >= kChannels )
+                continue;
+            const double factor = ( settings[ in.id ].inverted ? -1.0 : 1.0 ) * settings[ in.id ].probeAttn;
+            std::vector< double > &out = result.data[ in.id ];
+            out.resize( in.samples.size() );
+            for ( size_t i = 0; i < in.samples.size(); ++i )
+                out[ i ] = in.samples[ i ] * factor;
+            if ( in.clippedSamples )
+                result.clipped |= (unsigned char)( 1u << in.id );
+            samplesPerChannel = std::max( samplesPerChannel, in.samples.size() );
+        }
+        // El núcleo dispara por hardware con el pre-disparo fijo al 50 % y devuelve la captura ya
+        // rotada desde el triggerPoint, así que el disparo queda a mitad del registro (medido: el
+        // flanco de la CAL cae en la muestra ~5114 de 10240).
+        result.triggeredPosition = (int)( samplesPerChannel / 2 );
+        if ( debugChannel >= 0 && !result.data[ debugChannel ].empty() ) {
+            const std::vector< double > &v = result.data[ debugChannel ];
+            double mn = v[ 0 ], mx = v[ 0 ], sum = 0.0;
+            for ( double x : v ) {
+                mn = std::min( mn, x );
+                mx = std::max( mx, x );
+                sum += x;
+            }
+            const double mean = sum / (double)v.size();
+            double ac2 = 0.0;
+            for ( double x : v )
+                ac2 += ( x - mean ) * ( x - mean );
+            fprintf( stderr, "[gui] ch%d entregado n=%zu min=%.3f max=%.3f pp=%.3f mean=%.3f acrms=%.3f sonda=%.1f gain=%.3f\n",
+                     debugChannel + 1, v.size(), mn, mx, mx - mn, mean, std::sqrt( ac2 / (double)v.size() ),
+                     settings[ debugChannel ].probeAttn, settings[ debugChannel ].gain );
+        }
+    }
+    samplerate = frame.samplerate;
+    if ( samplerateChanged )
+        emit samplerateCalculated( samplerate, 1 );
+    if ( samplingUI )
+        emit samplesAvailable( &result );
 }
 
 Dso::ErrorCode Dso5200DsoControl::stringCommand( const QString & ) {
-    // No raw hex command console for this device yet (the DSO-5200's command shape - split
-    // bulk+control commands with a mandatory CONTROL_BEGINCOMMAND prelude - doesn't map onto
-    // HantekDsoControl's single "cc <hex code> <hex data>" control-only syntax).
-    return Dso::ErrorCode::UNSUPPORTED;
+    // Sin consola de comandos crudos: se usa para mostrar el estado del núcleo (útil para depurar).
+    if ( coreReady() )
+        emit statusMessage( QString::fromStdString( core->statusText() ), 10000 );
+    return Dso::ErrorCode::NONE;
 }
 
 void Dso5200DsoControl::quitSampling() {
-    std::lock_guard< std::mutex > lock( ioMutex );
-    sampling = false;
+    if ( core )
+        core->stop();
 }
 
 void Dso5200DsoControl::enableSamplingUI( bool enabled ) {
     samplingUI = enabled;
     emit showSamplingStatus( enabled );
-    std::lock_guard< std::mutex > lock( ioMutex );
-    sampling = enabled;
+    if ( !core )
+        return;
+    if ( enabled )
+        core->start();
+    else
+        core->stop();
 }
 
 void Dso5200DsoControl::restartSampling() {
-    std::lock_guard< std::mutex > lock( ioMutex );
-    samplingStarted = false; // forces threadMain() to re-issue BulkCaptureStart on its next cycle
+    // El núcleo rearma la captura solo después de cada cambio de configuración.
+}
+
+Dso::ErrorCode Dso5200DsoControl::setRecordTime( double duration ) {
+    if ( duration <= 0.0 )
+        duration = timebaseSeconds;
+    timebaseSeconds = duration;
+    samplerateDirty = true;
+    if ( !coreReady() )
+        return Dso::ErrorCode::CONNECTION;
+    return core->setTimebase( duration ) ? Dso::ErrorCode::NONE : Dso::ErrorCode::PARAMETER;
+}
+
+Dso::ErrorCode Dso5200DsoControl::setSamplerate( double newSamplerate ) {
+    if ( newSamplerate <= 0.0 )
+        return setRecordTime( timebaseSeconds );
+    return setRecordTime( kRecordLength / newSamplerate );
+}
+
+Dso::ErrorCode Dso5200DsoControl::setChannelUsed( ChannelID ch, bool used ) {
+    if ( ch >= kChannels )
+        return Dso::ErrorCode::PARAMETER;
+    {
+        std::lock_guard< std::mutex > lock( settingsMutex );
+        channel[ ch ].used = used;
+    }
+    if ( !coreReady() )
+        return Dso::ErrorCode::CONNECTION;
+    return core->setChannelEnabled( ch, used ) ? Dso::ErrorCode::NONE : Dso::ErrorCode::PARAMETER;
+}
+
+Dso::ErrorCode Dso5200DsoControl::setChannelInverted( ChannelID ch, bool inverted ) {
+    if ( ch >= kChannels )
+        return Dso::ErrorCode::PARAMETER;
+    std::lock_guard< std::mutex > lock( settingsMutex );
+    channel[ ch ].inverted = inverted; // se aplica en onCoreFrame()
+    return Dso::ErrorCode::NONE;
+}
+
+Dso::ErrorCode Dso5200DsoControl::setProbe( ChannelID ch, double probeAttn ) {
+    if ( ch >= kChannels || probeAttn <= 0.0 )
+        return Dso::ErrorCode::PARAMETER;
+    {
+        std::lock_guard< std::mutex > lock( settingsMutex );
+        channel[ ch ].probeAttn = probeAttn;
+    }
+    applyChannel( ch );
+    return Dso::ErrorCode::NONE;
+}
+
+Dso::ErrorCode Dso5200DsoControl::setGain( ChannelID ch, double gain ) {
+    if ( ch >= kChannels || gain <= 0.0 )
+        return Dso::ErrorCode::PARAMETER;
+    {
+        std::lock_guard< std::mutex > lock( settingsMutex );
+        channel[ ch ].gain = gain;
+    }
+    if ( !coreReady() )
+        return Dso::ErrorCode::CONNECTION;
+    applyChannel( ch );
+    return Dso::ErrorCode::NONE;
+}
+
+Dso::ErrorCode Dso5200DsoControl::setCoupling( ChannelID ch, Dso::Coupling coupling ) {
+    if ( ch >= kChannels )
+        return Dso::ErrorCode::PARAMETER;
+    {
+        std::lock_guard< std::mutex > lock( settingsMutex );
+        channel[ ch ].coupling = coupling;
+    }
+    if ( !coreReady() )
+        return Dso::ErrorCode::CONNECTION;
+    applyCoupling( ch );
+    if ( coupling == Dso::Coupling::GND )
+        emit statusMessage( tr( "DSO-5200: GND por software (el aparato no tiene relé de masa): CH%1 se muestra en 0 V." )
+                                .arg( ch + 1 ),
+                            5000 );
+    return Dso::ErrorCode::NONE;
+}
+
+Dso::ErrorCode Dso5200DsoControl::setTriggerMode( Dso::TriggerMode mode ) {
+    if ( mode == Dso::TriggerMode::AUTO )
+        return Dso::ErrorCode::NONE;
+    emit statusMessage( tr( "DSO-5200: solo el modo de disparo AUTO está disponible en el núcleo." ), 5000 );
+    return Dso::ErrorCode::UNSUPPORTED;
+}
+
+Dso::ErrorCode Dso5200DsoControl::setTriggerSource( int ch ) {
+    if ( ch == 0 )
+        return Dso::ErrorCode::NONE;
+    emit statusMessage( tr( "DSO-5200: el disparo solo puede venir de CH1 en el núcleo." ), 5000 );
+    return Dso::ErrorCode::UNSUPPORTED;
+}
+
+Dso::ErrorCode Dso5200DsoControl::setTriggerSmooth( int ) { return Dso::ErrorCode::UNSUPPORTED; }
+
+Dso::ErrorCode Dso5200DsoControl::setTriggerLevel( ChannelID ch, double level ) {
+    if ( ch != 0 )
+        return Dso::ErrorCode::UNSUPPORTED; // fuente fija CH1
+    {
+        std::lock_guard< std::mutex > lock( settingsMutex );
+        triggerLevel = level;
+    }
+    if ( !coreReady() )
+        return Dso::ErrorCode::CONNECTION;
+    applyTriggerLevel();
+    return Dso::ErrorCode::NONE;
+}
+
+Dso::ErrorCode Dso5200DsoControl::setTriggerSlope( Dso::Slope slope ) {
+    if ( slope == Dso::Slope::Both )
+        return Dso::ErrorCode::UNSUPPORTED;
+    if ( !coreReady() )
+        return Dso::ErrorCode::CONNECTION;
+    return core->setTriggerSlopeRising( slope == Dso::Slope::Positive ) ? Dso::ErrorCode::NONE
+                                                                        : Dso::ErrorCode::PARAMETER;
+}
+
+Dso::ErrorCode Dso5200DsoControl::setTriggerPosition( double ) {
+    // El pre-disparo del hardware queda fijo al 50 % en el núcleo. La GUI usa su propia posición para
+    // elegir qué parte del registro mostrar alrededor de triggeredPosition, así que esto basta.
+    return Dso::ErrorCode::NONE;
 }
 
 Dso::ErrorCode Dso5200DsoControl::setCalFreq( double ) { return Dso::ErrorCode::UNSUPPORTED; }
 
 void Dso5200DsoControl::calibrateOffset( bool ) {
-    emit statusMessage( tr( "The DSO-5200/5200A has no live EEPROM calibration." ), 5000 );
+    emit statusMessage( tr( "DSO-5200: sin calibración EEPROM/en vivo; el cero lo calcula el núcleo." ), 5000 );
+}
+
+void Dso5200DsoControl::applySettings( const DsoSettingsScope *scope ) {
+    if ( !scope )
+        return;
+    {
+        std::lock_guard< std::mutex > lock( settingsMutex );
+        for ( ChannelID ch = 0; ch < kChannels && ch < scope->voltage.size(); ++ch ) {
+            channel[ ch ].used = scope->voltage[ ch ].used;
+            channel[ ch ].inverted = scope->voltage[ ch ].inverted;
+            channel[ ch ].probeAttn = scope->voltage[ ch ].probeAttn > 0.0 ? scope->voltage[ ch ].probeAttn : 1.0;
+            channel[ ch ].gain = scope->gain( ch );
+        }
+        if ( !scope->voltage.empty() )
+            triggerLevel = scope->voltage[ 0 ].trigger;
+    }
+    timebaseSeconds = scope->horizontal.timebase * DIVS_TIME;
+    samplerateDirty = true;
+    if ( !coreReady() )
+        return;
+    core->setTimebase( timebaseSeconds );
+    for ( ChannelID ch = 0; ch < kChannels; ++ch ) {
+        core->setChannelEnabled( ch, channel[ ch ].used );
+        applyChannel( ch );
+    }
+    if ( scope->trigger.slope != Dso::Slope::Both )
+        core->setTriggerSlopeRising( scope->trigger.slope == Dso::Slope::Positive );
+    setTriggerMode( scope->trigger.mode );
+    setTriggerSource( scope->trigger.source );
+    for ( ChannelID ch = 0; ch < kChannels && ch < scope->voltage.size(); ++ch )
+        setCoupling( ch, scope->coupling( ch, model->spec() ) );
 }
 
 void Dso5200DsoControl::parkForReconnect() {
-    std::lock_guard< std::mutex > lock( ioMutex );
+    core.reset();
     device = nullptr;
 }
 
 void Dso5200DsoControl::rebindDevice( ScopeDevice *newScopeDevice ) {
-    std::lock_guard< std::mutex > lock( ioMutex );
     device = newScopeDevice;
-    samplingStarted = false;
-    captureState = 0; // Hantek::CAPTURE_WAITING
-    cycleCounter = 0;
-}
-
-Dso::ErrorCode Dso5200DsoControl::setRecordTime( double duration ) {
-    if ( duration <= 0.0 )
-        duration = targetTimebaseSeconds;
-    std::lock_guard< std::mutex > lock( ioMutex );
-    targetTimebaseSeconds = duration;
-    return doSetRecordTime( duration ) ? Dso::ErrorCode::NONE : Dso::ErrorCode::PARAMETER;
-}
-
-Dso::ErrorCode Dso5200DsoControl::setSamplerate( double samplerate ) {
-    if ( samplerate <= 0.0 )
-        return setRecordTime( targetTimebaseSeconds );
-    std::lock_guard< std::mutex > lock( ioMutex );
-    unsigned downsamplerValue = 0;
-    getBestSamplerate( samplerate, usedChannels <= 1, false, &downsamplerValue );
-    bool ok = updateSamplerate( downsamplerValue, usedChannels <= 1 );
-    emit samplerateCalculated( samplerateCurrent, 1 );
-    return ok ? Dso::ErrorCode::NONE : Dso::ErrorCode::PARAMETER;
-}
-
-Dso::ErrorCode Dso5200DsoControl::setChannelUsed( ChannelID channel, bool used ) {
-    if ( channel >= kChannels )
-        return Dso::ErrorCode::PARAMETER;
-    std::lock_guard< std::mutex > lock( ioMutex );
-    return doSetChannelUsed( channel, used ) ? Dso::ErrorCode::NONE : Dso::ErrorCode::PARAMETER;
-}
-
-Dso::ErrorCode Dso5200DsoControl::setChannelInverted( ChannelID channel, bool inverted ) {
-    if ( channel >= kChannels )
-        return Dso::ErrorCode::PARAMETER;
-    voltage[ channel ].inverted = inverted; // applied in convertRawDataToSamples()
-    return Dso::ErrorCode::NONE;
-}
-
-Dso::ErrorCode Dso5200DsoControl::setProbe( ChannelID channel, double probeAttn ) {
-    if ( channel >= kChannels )
-        return Dso::ErrorCode::PARAMETER;
-    voltage[ channel ].probeAttn = probeAttn; // applied in convertRawDataToSamples()
-    return Dso::ErrorCode::NONE;
-}
-
-Dso::ErrorCode Dso5200DsoControl::setGain( ChannelID channel, double gain ) {
-    if ( channel >= kChannels || gain <= 0.0 )
-        return Dso::ErrorCode::PARAMETER;
-    std::lock_guard< std::mutex > lock( ioMutex );
-    return doSetGain( channel, gain ) ? Dso::ErrorCode::NONE : Dso::ErrorCode::PARAMETER;
-}
-
-Dso::ErrorCode Dso5200DsoControl::setCoupling( ChannelID channel, Dso::Coupling coupling ) {
-    if ( channel >= kChannels )
-        return Dso::ErrorCode::PARAMETER;
-    std::lock_guard< std::mutex > lock( ioMutex );
-    voltage[ channel ].coupling = coupling;
-    applyRelays( channel );
-    return doSetOffset( channel, voltage[ channel ].offset ) ? Dso::ErrorCode::NONE : Dso::ErrorCode::PARAMETER;
-}
-
-Dso::ErrorCode Dso5200DsoControl::setTriggerMode( Dso::TriggerMode mode ) {
-    std::lock_guard< std::mutex > lock( ioMutex );
-    trigger.mode = mode;
-    return Dso::ErrorCode::NONE;
-}
-
-Dso::ErrorCode Dso5200DsoControl::setTriggerSource( int channel ) {
-    if ( channel < 0 || channel >= (int)kChannels )
-        return Dso::ErrorCode::PARAMETER;
-    std::lock_guard< std::mutex > lock( ioMutex );
-    trigger.source = (unsigned)channel;
-    triggerCommand.setTriggerSource( (uint8_t)( 1 - trigger.source ) ); // inverted mapping, see constructor
-    bulkCommand( triggerCommand );
-    return Dso::ErrorCode::NONE;
-}
-
-Dso::ErrorCode Dso5200DsoControl::setTriggerSmooth( int ) {
-    return Dso::ErrorCode::UNSUPPORTED; // no smoothing register in this protocol
-}
-
-Dso::ErrorCode Dso5200DsoControl::setTriggerLevel( ChannelID channel, double level ) {
-    if ( channel >= kChannels )
-        return Dso::ErrorCode::PARAMETER;
-    std::lock_guard< std::mutex > lock( ioMutex );
-    return doSetTriggerLevel( channel, level ) ? Dso::ErrorCode::NONE : Dso::ErrorCode::PARAMETER;
-}
-
-Dso::ErrorCode Dso5200DsoControl::setTriggerSlope( Dso::Slope slope ) {
-    std::lock_guard< std::mutex > lock( ioMutex );
-    trigger.slope = slope == Dso::Slope::Negative ? 1 : 0;
-    triggerCommand.setTriggerSlope( trigger.slope );
-    bulkCommand( triggerCommand );
-    return Dso::ErrorCode::NONE;
-}
-
-Dso::ErrorCode Dso5200DsoControl::setTriggerPosition( double position ) {
-    std::lock_guard< std::mutex > lock( ioMutex );
-    return doSetPretriggerPosition( position ) ? Dso::ErrorCode::NONE : Dso::ErrorCode::PARAMETER;
-}
-
-void Dso5200DsoControl::applySettings( const DsoSettingsScope *newScope ) {
-    std::lock_guard< std::mutex > lock( ioMutex );
-    scope = newScope;
-    if ( !scope )
-        return;
-    for ( ChannelID ch = 0; ch < kChannels && ch < scope->voltage.size(); ++ch ) {
-        doSetChannelUsed( ch, scope->voltage[ ch ].used );
-        doSetGain( ch, scope->gain( ch ) );
-        voltage[ ch ].inverted = scope->voltage[ ch ].inverted;
-        voltage[ ch ].probeAttn = scope->voltage[ ch ].probeAttn;
-    }
-    trigger.mode = scope->trigger.mode;
-    trigger.slope = scope->trigger.slope == Dso::Slope::Negative ? 1 : 0;
-    triggerCommand.setTriggerSlope( trigger.slope );
-    bulkCommand( triggerCommand );
-    if ( scope->trigger.source >= 0 && scope->trigger.source < (int)kChannels ) {
-        trigger.source = (unsigned)scope->trigger.source;
-        triggerCommand.setTriggerSource( (uint8_t)( 1 - trigger.source ) );
-        bulkCommand( triggerCommand );
-    }
-    doSetPretriggerPosition( scope->trigger.position );
-    doSetRecordTime( scope->horizontal.timebase * DIVS_TIME );
-}
-
-// --- Ported device logic ----------------------------------------------------
-
-double Dso5200DsoControl::getBestSamplerate( double samplerate, bool fastRate, bool maximum,
-                                             unsigned *downsamplerOut ) const {
-    if ( samplerate <= 0.0 )
-        return 0.0;
-
-    const double base = fastRate ? kMultiBase : kSingleBase;
-    const double max = fastRate ? kMultiMax : kSingleMax;
-
-    double bestDownsampler = base / kBufferDivider / samplerate;
-    double bestSamplerate;
-
-    if ( bestDownsampler < 1.0 && ( samplerate <= max / kBufferDivider || !maximum ) ) {
-        bestDownsampler = 0.0;
-        bestSamplerate = max / kBufferDivider;
-    } else {
-        bestDownsampler = maximum ? std::ceil( bestDownsampler ) : std::floor( bestDownsampler );
-        if ( bestDownsampler > kMaxDownsampler )
-            bestDownsampler = kMaxDownsampler;
-        bestSamplerate = base / bestDownsampler / kBufferDivider;
-    }
-
-    if ( downsamplerOut )
-        *downsamplerOut = (unsigned)bestDownsampler;
-    return bestSamplerate;
-}
-
-bool Dso5200DsoControl::updateSamplerate( unsigned downsamplerValue, bool fastRate ) {
-    const double base = fastRate ? kMultiBase : kSingleBase;
-    const double max = fastRate ? kMultiMax : kSingleMax;
-
-    const long int valueSlow = std::max( ( (long int)downsamplerValue - 3 ) / 2, (long int)0 );
-    const unsigned char valueFast = (unsigned char)( (long int)downsamplerValue - valueSlow * 2 );
-
-    samplerateCommand.setSamplerateFast( (uint8_t)( 4 - valueFast ) );
-    samplerateCommand.setSamplerateSlow( valueSlow == 0 ? 0 : (uint16_t)( 0xffff - valueSlow ) );
-    triggerCommand.setFastRate( fastRate );
-
-    bulkCommand( samplerateCommand );
-    bulkCommand( triggerCommand );
-
-    fastRateActive = fastRate;
-    downsampler = downsamplerValue;
-    if ( downsamplerValue )
-        samplerateCurrent = base / kBufferDivider / downsamplerValue;
-    else
-        samplerateCurrent = max / kBufferDivider;
-
-    doSetPretriggerPosition( trigger.position );
-    return true;
-}
-
-bool Dso5200DsoControl::applyTimebaseTableEntry( unsigned index, double *windowOut ) {
-    const TimebaseEntry &entry = kSlowTimebaseTable[ index ];
-    const unsigned divider = 2u * ( 0x10000u - entry.slow ) + 4u - entry.fast;
-    const double sr = kSingleMax / divider;
-
-    samplerateCommand.setSamplerateFast( entry.fast );
-    samplerateCommand.setSamplerateSlow( entry.slow );
-    triggerCommand.setFastRate( false );
-
-    bulkCommand( samplerateCommand );
-    bulkCommand( triggerCommand );
-
-    fastRateActive = false;
-    downsampler = divider;
-    samplerateCurrent = sr;
-    if ( windowOut )
-        *windowOut = (double)kRecordLengthSingle / sr;
-
-    doSetPretriggerPosition( trigger.position );
-    return true;
-}
-
-bool Dso5200DsoControl::doSetRecordTime( double duration ) {
-    if ( duration <= 0.0 )
-        return false;
-
-    unsigned bestIndex = 0;
-    double bestWindow = 0.0, bestError = 1e300;
-    for ( unsigned i = 0; i < kSlowTimebaseTableSize; ++i ) {
-        const TimebaseEntry &entry = kSlowTimebaseTable[ i ];
-        const unsigned divider = 2u * ( 0x10000u - entry.slow ) + 4u - entry.fast;
-        const double window = (double)kRecordLengthSingle * divider / kSingleMax;
-        const double error = std::abs( std::log( window / duration ) );
-        if ( error < bestError ) {
-            bestError = error;
-            bestIndex = i;
-            bestWindow = window;
-        }
-    }
-
-    if ( bestIndex == 0 && duration < bestWindow && usedChannels <= 1 ) {
-        const double targetSamplerate = (double)kRecordLengthSingle / duration;
-        unsigned downsamplerValue = 0;
-        getBestSamplerate( targetSamplerate, true, false, &downsamplerValue );
-        bool ok = updateSamplerate( downsamplerValue, true );
-        emit samplerateCalculated( samplerateCurrent, 1 );
-        return ok;
-    }
-
-    bool ok = applyTimebaseTableEntry( bestIndex, nullptr );
-    emit samplerateCalculated( samplerateCurrent, 1 );
-    return ok;
-}
-
-void Dso5200DsoControl::applyRelays( unsigned channel ) {
-    if ( voltage[ channel ].coupling == Dso::Coupling::GND ) {
-        // Isolated USB capture confirmed this exact signature (dso5200basic docs/GUIA_ESTUDIO.md):
-        // grounding the input forces GainBits=0 and both decade relays open, independent of
-        // whatever gain step was selected. The AC/DC coupling relay itself wasn't part of that
-        // capture (GND and AC/DC are separate switches on the real front panel) - left at DC here
-        // as the safer default; verify against hardware before relying on it.
-        gainCommand.setGain( channel, 0 );
-        relaysCommand.setBelow1V( channel, false );
-        relaysCommand.setBelow100mV( channel, false );
-        relaysCommand.setCoupling( channel, true );
-    } else {
-        const unsigned gainID = voltage[ channel ].gain;
-        gainCommand.setGain( channel, kGain[ gainID ].index );
-        relaysCommand.setBelow1V( channel, gainID >= 3 );
-        relaysCommand.setBelow100mV( channel, gainID >= 3 && gainID <= 5 );
-        relaysCommand.setCoupling( channel, voltage[ channel ].coupling == Dso::Coupling::DC );
-    }
-    bulkCommand( gainCommand );
-    device->controlWrite( &relaysCommand );
-}
-
-bool Dso5200DsoControl::doSetGain( unsigned channel, double gain ) {
-    unsigned gainID;
-    for ( gainID = 0; gainID < 8; ++gainID )
-        if ( kGain[ gainID ].voltsPerDiv >= gain )
-            break;
-
-    voltage[ channel ].gain = gainID;
-    applyRelays( channel );
-
-    return doSetOffset( channel, voltage[ channel ].offset );
-}
-
-bool Dso5200DsoControl::doSetOffset( unsigned channel, double offset ) {
-    Offset &limit = offsetLimit[ channel ].step[ voltage[ channel ].gain ];
-    const unsigned short minimum =
-        ( (unsigned short)*( (unsigned char *)&limit.start ) << 8 ) + *( (unsigned char *)&limit.start + 1 );
-    const unsigned short maximum =
-        ( (unsigned short)*( (unsigned char *)&limit.end ) << 8 ) + *( (unsigned char *)&limit.end + 1 );
-    const unsigned short offsetValue = (unsigned short)( offset * ( maximum - minimum ) + minimum + 0.5 );
-    const double offsetReal = (double)( offsetValue - minimum ) / ( maximum - minimum );
-
-    offsetCommand.setChannel( channel, offsetValue );
-    voltage[ channel ].offsetReal = offsetReal;
-    voltage[ channel ].offset = offset;
-
-    if ( !device )
-        return false;
-    device->controlWrite( &offsetCommand );
-
-    return doSetTriggerLevel( channel, trigger.level[ channel ] );
-}
-
-bool Dso5200DsoControl::doSetTriggerLevel( unsigned channel, double level ) {
-    trigger.level[ channel ] = level;
-
-    Offset &limit = offsetLimit[ channel ].step[ voltage[ channel ].gain ];
-    const unsigned short minimum =
-        ( (unsigned short)*( (unsigned char *)&limit.start ) << 8 ) + *( (unsigned char *)&limit.start + 1 );
-    const unsigned short maximum =
-        ( (unsigned short)*( (unsigned char *)&limit.end ) << 8 ) + *( (unsigned char *)&limit.end + 1 );
-
-    const double offsetReal = voltage[ channel ].offsetReal;
-    const double gainStep = kGain[ voltage[ channel ].gain ].voltsPerDiv;
-    unsigned short levelValue =
-        (unsigned short)( ( ( offsetReal + level / gainStep ) * ( maximum - minimum ) + 0.5 ) + minimum );
-    levelValue = std::clamp( levelValue, minimum, maximum );
-
-    if ( channel == trigger.source ) {
-        offsetCommand.setTrigger( levelValue );
-        if ( device )
-            device->controlWrite( &offsetCommand );
-    }
-    return true;
-}
-
-bool Dso5200DsoControl::doSetChannelUsed( unsigned channel, bool used ) {
-    voltage[ channel ].used = used;
-    unsigned channelCount = ( voltage[ 0 ].used ? 1u : 0u ) + ( voltage[ 1 ].used ? 1u : 0u );
-
-    UsedChannels usedChannelsValue = UsedChannels::USED_CH1;
-    if ( voltage[ 1 ].used )
-        usedChannelsValue = voltage[ 0 ].used ? UsedChannels::USED_CH1CH2 : UsedChannels::USED_CH2;
-
-    triggerCommand.setUsedChannels( (uint8_t)usedChannelsValue );
-    bulkCommand( triggerCommand );
-
-    const bool fastRateChanged = ( usedChannels <= 1 ) != ( channelCount <= 1 );
-    usedChannels = channelCount;
-
-    if ( fastRateChanged )
-        doSetRecordTime( targetTimebaseSeconds );
-
-    return true;
-}
-
-bool Dso5200DsoControl::doSetPretriggerPosition( double position ) {
-    const unsigned recordLength = getRecordLength();
-
-    double positionSamples = position * recordLength;
-    if ( isFastRate() )
-        positionSamples /= kChannels;
-
-    const unsigned positionPre = 0xffff - recordLength + (unsigned)positionSamples;
-    const unsigned positionPost = 0xffff - (unsigned)positionSamples;
-
-    bufferCommand.setTriggerPositionPre( (uint16_t)positionPre );
-    bufferCommand.setTriggerPositionPost( (uint16_t)positionPost );
-    bulkCommand( bufferCommand );
-
-    trigger.position = position;
-    return true;
-}
-
-bool Dso5200DsoControl::retrieveChannelLevelData() {
-    if ( !device )
-        return false;
-    int errorCode = device->controlRead( &getLimitsCommand );
-    if ( errorCode < 0 ) {
-        setLastError( tr( "Could not read channel limits from the oscilloscope: %1" ).arg( errorCode ) );
-        return false;
-    }
-    std::memcpy( offsetLimit, getLimitsCommand.data(), sizeof( OffsetsPerGainStep ) * kChannels );
-    return true;
-}
-
-int Dso5200DsoControl::bulkCommand( const std::vector< uint8_t > &command, int attempts ) {
-    if ( !device )
-        return LIBUSB_ERROR_NO_DEVICE;
-    int errorCode = device->controlWrite( &beginCommand );
-    if ( errorCode < 0 )
-        return errorCode;
-    return device->bulkWrite( command.data(), (unsigned)command.size(), attempts );
-}
-
-std::pair< int, unsigned > Dso5200DsoControl::getCaptureState() {
-    if ( !device )
-        return { (int)CAPTURE_ERROR, 0 };
-    int errorCode = bulkCommand( BulkGetCaptureState(), 1 );
-    if ( errorCode < 0 )
-        return { (int)CAPTURE_ERROR, 0 };
-
-    BulkResponseGetCaptureState response;
-    errorCode = device->bulkRead( &response );
-    if ( errorCode < 0 )
-        return { (int)CAPTURE_ERROR, 0 };
-
-    return { (int)response.getCaptureState(), response.getTriggerPoint() };
-}
-
-std::vector< unsigned char > Dso5200DsoControl::getSamples( unsigned &previousSampleCount ) {
-    if ( !device )
-        return {};
-    int errorCode = bulkCommand( BulkGetData(), 1 );
-    if ( errorCode < 0 ) {
-        setLastError( tr( "Reading sample data failed: %1" ).arg( errorCode ) );
-        return {};
-    }
-
-    unsigned totalSampleCount = getSampleCount();
-    if ( totalSampleCount < previousSampleCount )
-        std::swap( totalSampleCount, previousSampleCount );
-    else
-        previousSampleCount = totalSampleCount;
-
-    const unsigned dataLength = totalSampleCount * 2; // kSampleSize (10) > 8
-
-    std::vector< unsigned char > data( dataLength );
-    unsigned received = 0;
-    int rc = device->bulkReadMulti( data.data(), dataLength, false, received );
-    if ( rc < 0 ) {
-        setLastError( tr( "Reading sample data failed: %1" ).arg( rc ) );
-        return {};
-    }
-    data.resize( received );
-    return data;
-}
-
-void Dso5200DsoControl::convertRawDataToSamples( const std::vector< unsigned char > &rawData ) {
-    result.samplerate = samplerateCurrent;
-    result.liveTrigger = true;
-    result.triggeredPosition = 0;
-    result.clipped = 0;
-    for ( auto &v : result.data )
-        v.clear();
-
-    if ( rawData.size() < 2 )
-        return;
-    const size_t totalSampleCount = rawData.size() / 2; // kSampleSize (10) > 8
-
-    const unsigned extraBitsSize = kSampleSize - 8; // 2
-    const unsigned short extraBitsMask = ( 0x00ff << extraBitsSize ) & 0xff00;
-
-    std::vector< std::vector< double > > data( kChannels );
-
-    if ( isFastRate() ) {
-        unsigned channel = 0;
-        for ( ; channel < kChannels; ++channel )
-            if ( voltage[ channel ].used )
-                break;
-        if ( channel >= kChannels )
-            return;
-
-        data[ channel ].resize( totalSampleCount );
-
-        const unsigned gainID = voltage[ channel ].gain;
-        const unsigned short limit = kVoltageLimit[ gainID ];
-        const double offset = voltage[ channel ].offsetReal;
-        const double gainStep = kGain[ gainID ].voltsPerDiv;
-
-        unsigned bufferPosition = trigger.point * 2;
-        for ( unsigned pos = 0; pos < totalSampleCount; ++pos, ++bufferPosition ) {
-            if ( bufferPosition >= totalSampleCount )
-                bufferPosition %= totalSampleCount;
-
-            const unsigned short low = rawData[ bufferPosition ];
-            const unsigned extraBitsPosition = bufferPosition % kChannels;
-            const unsigned shift = 8 - ( kChannels - 1 - extraBitsPosition ) * extraBitsSize;
-            const unsigned short high =
-                ( (unsigned short)rawData[ totalSampleCount + bufferPosition - extraBitsPosition ] << shift ) &
-                extraBitsMask;
-
-            data[ channel ][ pos ] = ( (double)( low + high ) / limit - offset ) * gainStep;
-        }
-    } else {
-        for ( unsigned channel = 0; channel < kChannels; ++channel ) {
-            data[ channel ].resize( totalSampleCount / kChannels );
-
-            const unsigned gainID = voltage[ channel ].gain;
-            const unsigned short limit = kVoltageLimit[ gainID ];
-            const double offset = voltage[ channel ].offsetReal;
-            const double gainStep = kGain[ gainID ].voltsPerDiv;
-            const unsigned extraBitsIndex = 8 - channel * 2;
-
-            unsigned bufferPosition = trigger.point * 2;
-            for ( unsigned realPosition = 0; realPosition < data[ channel ].size();
-                 ++realPosition, bufferPosition += kChannels ) {
-                if ( bufferPosition >= totalSampleCount )
-                    bufferPosition %= totalSampleCount;
-
-                const unsigned short low = rawData[ bufferPosition + kChannels - 1 - channel ];
-                const unsigned short high =
-                    ( (unsigned short)rawData[ totalSampleCount + bufferPosition ] << extraBitsIndex ) & extraBitsMask;
-
-                data[ channel ][ realPosition ] = ( (double)( low + high ) / limit - offset ) * gainStep;
-            }
-        }
-    }
-
-    for ( unsigned ch = 0; ch < kChannels; ++ch ) {
-        if ( !voltage[ ch ].used || data[ ch ].empty() )
-            continue;
-        const double sign = voltage[ ch ].inverted ? -1.0 : 1.0;
-        const double probeAttn = voltage[ ch ].probeAttn;
-        result.data[ ch ].resize( data[ ch ].size() );
-        for ( size_t i = 0; i < data[ ch ].size(); ++i )
-            result.data[ ch ][ i ] = sign * data[ ch ][ i ] * probeAttn;
-    }
-}
-
-void Dso5200DsoControl::threadMain() {
-    while ( running.load() ) {
-        int sleepMs = 100;
-
-        if ( sampling.load() ) {
-            std::lock_guard< std::mutex > lock( ioMutex );
-
-            if ( !device || !device->isConnected() ) {
-                std::this_thread::sleep_for( std::chrono::milliseconds( sleepMs ) );
-                continue;
-            }
-
-            unsigned triggerPoint;
-            std::tie( captureState, triggerPoint ) = getCaptureState();
-            trigger.point = triggerPoint; // raw value - no bit-decode needed on the DSO-5200(A), see dso5200basic
-
-            if ( captureState == (int)CAPTURE_ERROR ) {
-                setLastError( tr( "Could not read the capture state" ) );
-                emit communicationError();
-            } else {
-                switch ( captureState ) {
-                case CAPTURE_READY5200: {
-                    std::vector< unsigned char > rawData = getSamples( expectedSampleCount );
-                    if ( samplingStarted && !rawData.empty() ) {
-                        convertRawDataToSamples( rawData );
-                        if ( samplingUI )
-                            emit samplesAvailable( &result );
-                    }
-                    samplingStarted = false;
-
-                    if ( !sampling.load() )
-                        break;
-                    [[fallthrough]];
-                }
-                case CAPTURE_WAITING:
-                case CAPTURE_SAMPLING:
-                    expectedSampleCount = getSampleCount();
-
-                    if ( samplingStarted ) {
-                        ++cycleCounter;
-
-                        if ( cycleCounter == startCycle ) {
-                            bulkCommand( BulkTriggerEnabled() );
-                        } else if ( cycleCounter >= 8 + startCycle ) {
-                            if ( trigger.mode != Dso::TriggerMode::SINGLE )
-                                bulkCommand( BulkForceTrigger() );
-                        }
-
-                        if ( cycleCounter < 20 || cycleCounter < 4000 / cycleTimeMs )
-                            break;
-                    }
-
-                    bulkCommand( BulkCaptureStart() );
-                    samplingStarted = true;
-                    cycleCounter = 0;
-                    startCycle = (int)( trigger.position *
-                                            ( (double)getRecordLength() / samplerateCurrent * 1000.0 ) / cycleTimeMs +
-                                        1.0 );
-                    break;
-
-                default:
-                    break;
-                }
-            }
-
-            cycleTimeMs = std::clamp( (int)( (double)getRecordLength() / samplerateCurrent * 250 ), 10, 1000 );
-            sleepMs = cycleTimeMs;
-        }
-
-        std::this_thread::sleep_for( std::chrono::milliseconds( sleepMs ) );
-    }
+    openCore();
 }

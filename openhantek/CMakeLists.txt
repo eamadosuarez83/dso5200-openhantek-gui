@@ -102,6 +102,41 @@ else()
     target_compile_options(${PROJECT_NAME} PRIVATE "$<$<CONFIG:RELEASE>:-fno-rtti>")
 endif()
 
+# --- Núcleo del protocolo DSO-5200/5200A -------------------------------------------------------
+# Las fuentes del protocolo se compilan TAL CUAL desde dso5200basic (repo eamadosuarez83/dso5200-cli),
+# que es la referencia validada contra el aparato y no se modifica desde aquí. Por omisión se espera
+# como carpeta hermana de este repo; se puede apuntar a otra copia con -DDSO5200BASIC_DIR=...
+set(DSO5200BASIC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../dso5200basic" CACHE PATH "Raíz de dso5200basic")
+if(NOT EXISTS "${DSO5200BASIC_DIR}/src/device/dso5200.cpp")
+    message(FATAL_ERROR "No se encuentra dso5200basic en '${DSO5200BASIC_DIR}' (usa -DDSO5200BASIC_DIR=...)")
+endif()
+add_library(dso5200core STATIC
+    dso5200core/dso5200core.cpp
+    ${DSO5200BASIC_DIR}/src/device/dso5200.cpp
+    ${DSO5200BASIC_DIR}/src/usb/usbdevice.cpp
+    ${DSO5200BASIC_DIR}/src/protocol/bulkcommand.cpp
+    ${DSO5200BASIC_DIR}/src/protocol/bulkStructs.cpp
+    ${DSO5200BASIC_DIR}/src/protocol/controlcommand.cpp
+    ${DSO5200BASIC_DIR}/src/protocol/controlStructs.cpp)
+# BEFORE: los includes de dso5200basic ("usb/usbdevice.h", "protocol/...") deben resolverse en su
+# árbol antes que en src/ de la GUI, que se hereda de include_directories() más arriba.
+target_include_directories(dso5200core BEFORE PRIVATE ${DSO5200BASIC_DIR}/src)
+set_target_properties(dso5200core PROPERTIES AUTOMOC OFF AUTOUIC OFF AUTORCC OFF)
+if(NOT MSVC)
+    # dso5200basic se escribió para C++17; con el estándar de la GUI avisa de operaciones entre enums
+    # de libusb que son correctas. Se silencia solo en el núcleo.
+    target_compile_options(dso5200core PRIVATE -Wno-deprecated-enum-enum-conversion)
+endif()
+# La GUI también define el namespace `Hantek` (protocolo 6022) y una `libUsbErrorString(int)` global
+# que solo difiere en el tipo de retorno: se renombran en el núcleo para que no choquen al enlazar.
+target_compile_definitions(dso5200core PRIVATE Hantek=Hantek5200core libUsbErrorString=dso5200core_libUsbErrorString)
+if(NOT MSVC)
+    target_include_directories(dso5200core PRIVATE ${LIBUSB_INCLUDE_DIRS})
+    target_link_libraries(dso5200core PUBLIC ${LIBUSB_LIBRARIES} ${CMAKE_THREAD_LIBS_INIT})
+endif()
+target_include_directories(${PROJECT_NAME} PRIVATE dso5200core)
+target_link_libraries(${PROJECT_NAME} dso5200core)
+
 if(WIN32)
     include(../cmake/docs_on_windows.cmake)
     include(../cmake/windows_driver.cmake)
