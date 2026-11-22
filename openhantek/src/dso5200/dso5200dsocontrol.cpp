@@ -5,6 +5,8 @@
 #include "dso5200dsocontrol.h"
 
 #include <QReadLocker>
+#include <algorithm>
+#include <climits>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -102,17 +104,23 @@ void Dso5200DsoControl::applyTriggerLevel() {
     double levelAtInput;
     {
         std::lock_guard< std::mutex > lock( settingsMutex );
-        levelAtInput = triggerLevel / channel[ 0 ].probeAttn;
+        levelAtInput = triggerLevel[ 0 ] / channel[ 0 ].probeAttn;
     }
     core->setTriggerLevel( levelAtInput );
 }
 
 void Dso5200DsoControl::onCoreFrame( const Dso5200Core::Frame &frame ) {
     ChannelSettings settings[ kChannels ];
+    int source;
+    double softLevel;
+    bool rising;
     {
         std::lock_guard< std::mutex > lock( settingsMutex );
         for ( unsigned ch = 0; ch < kChannels; ++ch )
             settings[ ch ] = channel[ ch ];
+        source = triggerSource;
+        softLevel = triggerLevel[ 1 ];
+        rising = triggerRising;
     }
 
     const bool samplerateChanged = samplerateDirty.exchange( false ) || frame.samplerate != samplerate;
@@ -142,6 +150,14 @@ void Dso5200DsoControl::onCoreFrame( const Dso5200Core::Frame &frame ) {
         // rotada desde el triggerPoint, así que el disparo queda a mitad del registro (medido: el
         // flanco de la CAL cae en la muestra ~5114 de 10240).
         result.triggeredPosition = (int)( samplesPerChannel / 2 );
+        if ( source == 1 && !result.data[ 1 ].empty() ) {
+            // Disparo por software en CH2. Las muestras ya están en voltios en la punta (sonda e
+            // inversión aplicadas), igual que el nivel de la GUI. Histéresis 0.1 div contra el ruido.
+            const int pos = findSoftwareTrigger( result.data[ 1 ], softLevel, 0.1 * settings[ 1 ].gain, rising );
+            result.liveTrigger = pos >= 0;
+            if ( pos >= 0 )
+                result.triggeredPosition = std::max( pos, 1 ); // 0 significa "sin disparo" para la GUI
+        }
         if ( debugChannel >= 0 && !result.data[ debugChannel ].empty() ) {
             const std::vector< double > &v = result.data[ debugChannel ];
             double mn = v[ 0 ], mx = v[ 0 ], sum = 0.0;
@@ -157,6 +173,10 @@ void Dso5200DsoControl::onCoreFrame( const Dso5200Core::Frame &frame ) {
             fprintf( stderr, "[gui] ch%d entregado n=%zu min=%.3f max=%.3f pp=%.3f mean=%.3f acrms=%.3f sonda=%.1f gain=%.3f\n",
                      debugChannel + 1, v.size(), mn, mx, mx - mn, mean, std::sqrt( ac2 / (double)v.size() ),
                      settings[ debugChannel ].probeAttn, settings[ debugChannel ].gain );
+            const int tp = result.triggeredPosition;
+            if ( tp > 20 && tp + 20 < (int)v.size() )
+                fprintf( stderr, "[gui] disparo fuente=CH%d pos=%d live=%d antes=%.3f despues=%.3f\n", source + 1, tp,
+                         (int)result.liveTrigger, v[ tp - 20 ], v[ tp + 20 ] );
         }
     }
     samplerate = frame.samplerate;
@@ -164,6 +184,30 @@ void Dso5200DsoControl::onCoreFrame( const Dso5200Core::Frame &frame ) {
         emit samplerateCalculated( samplerate, 1 );
     if ( samplingUI )
         emit samplesAvailable( &result );
+}
+
+int Dso5200DsoControl::findSoftwareTrigger( const std::vector< double > &samples, double level, double hysteresis,
+                                            bool rising ) {
+    const int middle = int( samples.size() / 2 );
+    int best = -1;
+    int bestDistance = INT_MAX;
+    bool armed = false; // la señal tiene que haber pasado por debajo de level - hysteresis antes del cruce
+    const double sign = rising ? 1.0 : -1.0;
+    const double threshold = sign * level;
+    for ( size_t i = 0; i < samples.size(); ++i ) {
+        const double v = sign * samples[ i ];
+        if ( v < threshold - hysteresis ) {
+            armed = true;
+        } else if ( armed && v >= threshold ) {
+            armed = false;
+            const int distance = std::abs( int( i ) - middle );
+            if ( distance < bestDistance ) {
+                bestDistance = distance;
+                best = int( i );
+            }
+        }
+    }
+    return best;
 }
 
 Dso::ErrorCode Dso5200DsoControl::stringCommand( const QString & ) {
@@ -279,21 +323,30 @@ Dso::ErrorCode Dso5200DsoControl::setTriggerMode( Dso::TriggerMode mode ) {
 }
 
 Dso::ErrorCode Dso5200DsoControl::setTriggerSource( int ch ) {
-    if ( ch == 0 )
-        return Dso::ErrorCode::NONE;
-    emit statusMessage( tr( "DSO-5200: el disparo solo puede venir de CH1 en el núcleo." ), 5000 );
-    return Dso::ErrorCode::UNSUPPORTED;
+    if ( ch < 0 || ch >= int( kChannels ) ) {
+        emit statusMessage( tr( "DSO-5200: el disparo solo puede venir de CH1 o CH2." ), 5000 );
+        return Dso::ErrorCode::UNSUPPORTED;
+    }
+    {
+        std::lock_guard< std::mutex > lock( settingsMutex );
+        triggerSource = ch;
+    }
+    if ( ch == 1 )
+        emit statusMessage( tr( "DSO-5200: disparo de CH2 por software (el aparato solo dispara desde CH1)." ), 5000 );
+    return Dso::ErrorCode::NONE;
 }
 
 Dso::ErrorCode Dso5200DsoControl::setTriggerSmooth( int ) { return Dso::ErrorCode::UNSUPPORTED; }
 
 Dso::ErrorCode Dso5200DsoControl::setTriggerLevel( ChannelID ch, double level ) {
-    if ( ch != 0 )
-        return Dso::ErrorCode::UNSUPPORTED; // fuente fija CH1
+    if ( ch >= kChannels )
+        return Dso::ErrorCode::PARAMETER;
     {
         std::lock_guard< std::mutex > lock( settingsMutex );
-        triggerLevel = level;
+        triggerLevel[ ch ] = level;
     }
+    if ( ch == 1 )
+        return Dso::ErrorCode::NONE; // CH2: lo usa el disparo por software en onCoreFrame()
     if ( !coreReady() )
         return Dso::ErrorCode::CONNECTION;
     applyTriggerLevel();
@@ -303,6 +356,10 @@ Dso::ErrorCode Dso5200DsoControl::setTriggerLevel( ChannelID ch, double level ) 
 Dso::ErrorCode Dso5200DsoControl::setTriggerSlope( Dso::Slope slope ) {
     if ( slope == Dso::Slope::Both )
         return Dso::ErrorCode::UNSUPPORTED;
+    {
+        std::lock_guard< std::mutex > lock( settingsMutex );
+        triggerRising = slope == Dso::Slope::Positive;
+    }
     if ( !coreReady() )
         return Dso::ErrorCode::CONNECTION;
     return core->setTriggerSlopeRising( slope == Dso::Slope::Positive ) ? Dso::ErrorCode::NONE
@@ -332,8 +389,10 @@ void Dso5200DsoControl::applySettings( const DsoSettingsScope *scope ) {
             channel[ ch ].probeAttn = scope->voltage[ ch ].probeAttn > 0.0 ? scope->voltage[ ch ].probeAttn : 1.0;
             channel[ ch ].gain = scope->gain( ch );
         }
-        if ( !scope->voltage.empty() )
-            triggerLevel = scope->voltage[ 0 ].trigger;
+        for ( ChannelID ch = 0; ch < kChannels && ch < scope->voltage.size(); ++ch )
+            triggerLevel[ ch ] = scope->voltage[ ch ].trigger;
+        if ( scope->trigger.slope != Dso::Slope::Both )
+            triggerRising = scope->trigger.slope == Dso::Slope::Positive;
     }
     timebaseSeconds = scope->horizontal.timebase * DIVS_TIME;
     samplerateDirty = true;

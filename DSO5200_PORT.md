@@ -41,6 +41,14 @@ recompilar.
   ese canal en la posición del búfer de CH1 (con otro cero y otra ganancia) y el núcleo lo leía en
   la suya: la traza se caía. Pendiente arreglarlo en `dso5200basic` (comando `channel 1|2` de la CLI).
 
+- **Disparo desde CH2 por software** (22-nov-2026). El aparato solo dispara por hardware desde
+  CH1 (dso5200basic `6a7da56`: ninguno de los otros valores del campo de fuente dispara). Con la
+  fuente en CH2, el adaptador busca en cada captura el cruce del nivel con la pendiente elegida
+  (histéresis 0.1 div) más cercano al centro del registro y lo marca como punto de disparo. Va
+  bien cuando entran varios períodos en el registro (CAL de 1 kHz a 1 ms/div: el flanco cae a
+  ±500 muestras del centro y la pantalla se llena). Con pocos períodos (200 µs/div: unos 2) el
+  flanco elegido puede quedar lejos del centro y la traza "salta" con un hueco variable a un lado.
+
 ## Pendiente
 
 - Lo que el núcleo aún no ofrece se rechaza con un aviso en la barra de estado: disparo por CH2,
