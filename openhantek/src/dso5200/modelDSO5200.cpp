@@ -7,8 +7,9 @@
 //    the official Windows software's relay clicks, see kGain there;
 //  - the samplerate limits (single/multi base+max) from the protocol docs
 //    (bulkcode.h) confirmed against hardware;
-//  - couplings include GND (relay signature GainBits=0, below1V=false,
-//    below100mV=false), confirmed via isolated USB capture.
+//  - acoplamiento DC/AC: relé real por canal (dso5200basic a072f1b, medido con la CAL). GND no
+//    existe en el hardware (no hay relé de masa; la vieja "firma GND" era el grupo de 2-10 V): el
+//    núcleo deja el relé en DC y entrega 0 V en ese canal.
 //
 // specification.gain[].gainValue here is display-only (no code in
 // Dso5200DsoControl reads it back) - it records the within-decade multiplier
@@ -40,6 +41,8 @@ static void initSpecifications( Dso::ControlSpecification &specification ) {
     specification.fixedSampleRates.clear();
 
     specification.couplings = { Dso::Coupling::DC, Dso::Coupling::AC, Dso::Coupling::GND };
+    // Sin esto el panel de tensión solo ofrece DC (la opción existe para el 6022, que no tiene AC).
+    specification.hasACcoupling = true;
     specification.triggerModes = {
         Dso::TriggerMode::AUTO,
         Dso::TriggerMode::NORMAL,

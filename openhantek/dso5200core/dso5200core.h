@@ -29,6 +29,9 @@ class Dso5200Core {
         uint32_t clippedSamples = 0;   ///< muestras en el tope del ADC (0 o 1023)
         std::vector< double > samples; ///< voltios
     };
+    /// Mismo orden que Dso::Coupling de la GUI y que Coupling de dso5200basic.
+    enum class Coupling { DC, AC, GND };
+
     struct Frame {
         uint32_t frameNumber = 0;
         double samplerate = 0.0;
@@ -54,9 +57,14 @@ class Dso5200Core {
     bool setTimebase( double secondsPerScreen );
     bool setVoltsPerDiv( unsigned channel, double voltsPerDiv );
     bool setChannelEnabled( unsigned channel, bool enabled );
+    /// DC/AC: relé real del canal. GND: el aparato no tiene relé de masa; el núcleo deja el relé en DC
+    /// y entrega el canal como 0 V.
+    bool setCoupling( unsigned channel, Coupling coupling );
     bool setTriggerSlopeRising( bool rising );
     bool setTriggerLevel( double volts ); ///< fuente fija CH1 en el núcleo
     std::string statusText() const;
+    /// Depuración: estadísticas crudas del ADC por frame a stderr (el comando `cal` de la CLI).
+    void setRawStats( bool enabled, unsigned channel );
 
     /// Se llaman desde el hilo de captura del núcleo, no desde el hilo de la GUI.
     std::function< void( const Frame & ) > onFrame;

@@ -88,10 +88,25 @@ bool Dso5200Core::setChannelEnabled( unsigned channel, bool enabled ) {
     return impl->control && impl->control->setChannelEnabled( (int)channel, enabled );
 }
 
+bool Dso5200Core::setCoupling( unsigned channel, Coupling coupling ) {
+    // `Coupling` a secas es el enum anidado del puente; ::Coupling es el de dso5200basic.
+    ::Coupling mode = ::Coupling::DC;
+    if ( coupling == Coupling::AC )
+        mode = ::Coupling::AC;
+    else if ( coupling == Coupling::GND )
+        mode = ::Coupling::GND;
+    return impl->control && impl->control->setCoupling( (int)channel, mode );
+}
+
 bool Dso5200Core::setTriggerSlopeRising( bool rising ) {
     return impl->control && impl->control->setTriggerSlope( rising ? TriggerSlope::Rising : TriggerSlope::Falling );
 }
 
 bool Dso5200Core::setTriggerLevel( double volts ) { return impl->control && impl->control->setTriggerLevel( volts ); }
+
+void Dso5200Core::setRawStats( bool enabled, unsigned channel ) {
+    if ( impl->control )
+        impl->control->debugSetRawStats( enabled, channel );
+}
 
 std::string Dso5200Core::statusText() const { return impl->control ? impl->control->statusText() : std::string(); }

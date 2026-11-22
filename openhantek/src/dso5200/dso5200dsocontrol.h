@@ -10,7 +10,7 @@
 //    (voltios en la entrada del aparato), dividiendo por la atenuación de la sonda;
 //  - convierte cada captura del núcleo en DSOsamples (multiplicando por la sonda, inversión de canal,
 //    bit de recorte y posición del disparo por hardware);
-//  - rechaza con UNSUPPORTED lo que el núcleo todavía no ofrece (acople AC/GND, disparo por CH2,
+//  - rechaza con UNSUPPORTED lo que el núcleo todavía no ofrece (disparo por CH2,
 //    modos NORMAL/SINGLE, mover el punto de disparo, generador de calibración, calibración EEPROM).
 
 #pragma once
@@ -83,11 +83,13 @@ class Dso5200DsoControl : public IDsoControl {
         bool inverted = false;
         double probeAttn = 1.0;
         double gain = 0.5; ///< V/div en la punta de la sonda, tal como lo pide la GUI
+        Dso::Coupling coupling = Dso::Coupling::DC; ///< igual que el arranque del núcleo
     };
 
     bool openCore();
     void applyChannel( ChannelID channel ); ///< reenvía V/div (y nivel si es CH1) al núcleo
     void applyTriggerLevel();
+    void applyCoupling( ChannelID channel );
     void onCoreFrame( const Dso5200Core::Frame &frame ); ///< hilo de captura del núcleo
     bool coreReady() const { return core && core->isConnected(); }
 
@@ -106,6 +108,7 @@ class Dso5200DsoControl : public IDsoControl {
     /// con el siguiente frame.
     std::atomic< bool > samplerateDirty{ true };
     bool samplingUI = true;
+    int debugChannel = -1; ///< DSO5200_CAL
 
     DSOsamples result;
 };

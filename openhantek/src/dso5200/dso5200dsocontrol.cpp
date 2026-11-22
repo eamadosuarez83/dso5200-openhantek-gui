@@ -5,6 +5,9 @@
 #include "dso5200dsocontrol.h"
 
 #include <QReadLocker>
+#include <cmath>
+#include <cstdio>
+#include <cstdlib>
 #include <QWriteLocker>
 
 #include "dsomodel.h"
@@ -47,7 +50,15 @@ bool Dso5200DsoControl::openCore() {
     core->setTimebase( timebaseSeconds );
     for ( ChannelID ch = 0; ch < kChannels; ++ch ) {
         core->setChannelEnabled( ch, channel[ ch ].used );
+        applyCoupling( ch );
         applyChannel( ch );
+    }
+    // Depuración: DSO5200_CAL=1|2 vuelca a stderr, por frame, las estadísticas crudas del ADC del
+    // núcleo y las de las muestras que se entregan a la GUI, para comparar con la CLI.
+    if ( const char *cal = std::getenv( "DSO5200_CAL" ) ) {
+        debugChannel = std::atoi( cal ) - 1;
+        if ( debugChannel >= 0 && debugChannel < (int)kChannels )
+            core->setRawStats( true, (unsigned)debugChannel );
     }
     if ( samplingUI )
         core->start();
@@ -67,6 +78,22 @@ void Dso5200DsoControl::applyChannel( ChannelID ch ) {
     core->setVoltsPerDiv( ch, voltsPerDivAtInput );
     if ( ch == 0 )
         applyTriggerLevel(); // el nivel del núcleo va en voltios en la entrada: depende de la sonda de CH1
+}
+
+void Dso5200DsoControl::applyCoupling( ChannelID ch ) {
+    if ( !coreReady() || ch >= kChannels )
+        return;
+    Dso::Coupling coupling;
+    {
+        std::lock_guard< std::mutex > lock( settingsMutex );
+        coupling = channel[ ch ].coupling;
+    }
+    Dso5200Core::Coupling mode = Dso5200Core::Coupling::DC;
+    if ( coupling == Dso::Coupling::AC )
+        mode = Dso5200Core::Coupling::AC;
+    else if ( coupling == Dso::Coupling::GND )
+        mode = Dso5200Core::Coupling::GND;
+    core->setCoupling( ch, mode );
 }
 
 void Dso5200DsoControl::applyTriggerLevel() {
@@ -115,6 +142,22 @@ void Dso5200DsoControl::onCoreFrame( const Dso5200Core::Frame &frame ) {
         // rotada desde el triggerPoint, así que el disparo queda a mitad del registro (medido: el
         // flanco de la CAL cae en la muestra ~5114 de 10240).
         result.triggeredPosition = (int)( samplesPerChannel / 2 );
+        if ( debugChannel >= 0 && !result.data[ debugChannel ].empty() ) {
+            const std::vector< double > &v = result.data[ debugChannel ];
+            double mn = v[ 0 ], mx = v[ 0 ], sum = 0.0;
+            for ( double x : v ) {
+                mn = std::min( mn, x );
+                mx = std::max( mx, x );
+                sum += x;
+            }
+            const double mean = sum / (double)v.size();
+            double ac2 = 0.0;
+            for ( double x : v )
+                ac2 += ( x - mean ) * ( x - mean );
+            fprintf( stderr, "[gui] ch%d entregado n=%zu min=%.3f max=%.3f pp=%.3f mean=%.3f acrms=%.3f sonda=%.1f gain=%.3f\n",
+                     debugChannel + 1, v.size(), mn, mx, mx - mn, mean, std::sqrt( ac2 / (double)v.size() ),
+                     settings[ debugChannel ].probeAttn, settings[ debugChannel ].gain );
+        }
     }
     samplerate = frame.samplerate;
     if ( samplerateChanged )
@@ -213,10 +256,18 @@ Dso::ErrorCode Dso5200DsoControl::setGain( ChannelID ch, double gain ) {
 Dso::ErrorCode Dso5200DsoControl::setCoupling( ChannelID ch, Dso::Coupling coupling ) {
     if ( ch >= kChannels )
         return Dso::ErrorCode::PARAMETER;
-    if ( coupling == Dso::Coupling::DC )
-        return Dso::ErrorCode::NONE;
-    emit statusMessage( tr( "DSO-5200: el acople AC/GND todavía no está en el núcleo; se usa DC." ), 5000 );
-    return Dso::ErrorCode::UNSUPPORTED;
+    {
+        std::lock_guard< std::mutex > lock( settingsMutex );
+        channel[ ch ].coupling = coupling;
+    }
+    if ( !coreReady() )
+        return Dso::ErrorCode::CONNECTION;
+    applyCoupling( ch );
+    if ( coupling == Dso::Coupling::GND )
+        emit statusMessage( tr( "DSO-5200: GND por software (el aparato no tiene relé de masa): CH%1 se muestra en 0 V." )
+                                .arg( ch + 1 ),
+                            5000 );
+    return Dso::ErrorCode::NONE;
 }
 
 Dso::ErrorCode Dso5200DsoControl::setTriggerMode( Dso::TriggerMode mode ) {
