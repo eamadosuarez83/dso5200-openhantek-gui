@@ -1,0 +1,7 @@
+# Artefactos de makepkg
+src/
+pkg/
+dso5200gui/
+dso5200basic/
+*.pkg.tar.*
+*.log

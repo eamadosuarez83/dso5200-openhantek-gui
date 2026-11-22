@@ -49,7 +49,7 @@ bool Dso5200DsoControl::openCore() {
     // último que pidió la GUI).
     core->setTimebase( timebaseSeconds );
     for ( ChannelID ch = 0; ch < kChannels; ++ch ) {
-        core->setChannelEnabled( ch, channel[ ch ].used );
+        core->setChannelEnabled( ch, true ); // ver setChannelUsed()
         applyCoupling( ch );
         applyChannel( ch );
     }
@@ -127,8 +127,8 @@ void Dso5200DsoControl::onCoreFrame( const Dso5200Core::Frame &frame ) {
         result.tag = frame.frameNumber;
         size_t samplesPerChannel = 0;
         for ( const Dso5200Core::Channel &in : frame.channels ) {
-            if ( in.id >= kChannels )
-                continue;
+            if ( in.id >= kChannels || !settings[ in.id ].used )
+                continue; // canal oculto en la GUI (en el aparato sigue activo, ver setChannelUsed())
             const double factor = ( settings[ in.id ].inverted ? -1.0 : 1.0 ) * settings[ in.id ].probeAttn;
             std::vector< double > &out = result.data[ in.id ];
             out.resize( in.samples.size() );
@@ -209,16 +209,17 @@ Dso::ErrorCode Dso5200DsoControl::setSamplerate( double newSamplerate ) {
     return setRecordTime( kRecordLength / newSamplerate );
 }
 
+// Los dos canales quedan SIEMPRE activos en el aparato; "usar" un canal en la GUI solo decide si
+// se entregan sus muestras. Medido 22-nov-2026: con un solo canal activo en el hardware (USED_CH2)
+// el aparato entrega ese canal en la posición del búfer de CH1, con otro cero (~5 cuentas) y otra
+// ganancia (~3 %), y el núcleo lo lee en la posición de siempre: la traza "se cae". Es la
+// configuración con la que está calibrado todo el núcleo. Pendiente en dso5200basic.
 Dso::ErrorCode Dso5200DsoControl::setChannelUsed( ChannelID ch, bool used ) {
     if ( ch >= kChannels )
         return Dso::ErrorCode::PARAMETER;
-    {
-        std::lock_guard< std::mutex > lock( settingsMutex );
-        channel[ ch ].used = used;
-    }
-    if ( !coreReady() )
-        return Dso::ErrorCode::CONNECTION;
-    return core->setChannelEnabled( ch, used ) ? Dso::ErrorCode::NONE : Dso::ErrorCode::PARAMETER;
+    std::lock_guard< std::mutex > lock( settingsMutex );
+    channel[ ch ].used = used; // se aplica en onCoreFrame()
+    return Dso::ErrorCode::NONE;
 }
 
 Dso::ErrorCode Dso5200DsoControl::setChannelInverted( ChannelID ch, bool inverted ) {
@@ -340,7 +341,7 @@ void Dso5200DsoControl::applySettings( const DsoSettingsScope *scope ) {
         return;
     core->setTimebase( timebaseSeconds );
     for ( ChannelID ch = 0; ch < kChannels; ++ch ) {
-        core->setChannelEnabled( ch, channel[ ch ].used );
+        core->setChannelEnabled( ch, true ); // ver setChannelUsed()
         applyChannel( ch );
     }
     if ( scope->trigger.slope != Dso::Slope::Both )
