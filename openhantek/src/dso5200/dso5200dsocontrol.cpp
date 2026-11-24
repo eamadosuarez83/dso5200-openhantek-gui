@@ -134,10 +134,21 @@ void Dso5200DsoControl::onCoreFrame( const Dso5200Core::Frame &frame ) {
         result.freeRunning = false;
         result.tag = frame.frameNumber;
         size_t samplesPerChannel = 0;
+        // Muestras de CH2 para el disparo por software. Se toman aunque CH2 esté oculto en la GUI:
+        // el aparato lo sigue capturando (ver setChannelUsed()). Antes se buscaba el flanco en
+        // result.data[1], que queda vacío con CH2 oculto, y el disparo se perdía sin avisar.
+        std::vector< double > ch2Trigger;
         for ( const Dso5200Core::Channel &in : frame.channels ) {
-            if ( in.id >= kChannels || !settings[ in.id ].used )
-                continue; // canal oculto en la GUI (en el aparato sigue activo, ver setChannelUsed())
+            if ( in.id >= kChannels )
+                continue;
             const double factor = ( settings[ in.id ].inverted ? -1.0 : 1.0 ) * settings[ in.id ].probeAttn;
+            if ( source == 1 && in.id == 1 ) {
+                ch2Trigger.resize( in.samples.size() );
+                for ( size_t i = 0; i < in.samples.size(); ++i )
+                    ch2Trigger[ i ] = in.samples[ i ] * factor;
+            }
+            if ( !settings[ in.id ].used )
+                continue; // canal oculto en la GUI: no se entregan sus muestras
             std::vector< double > &out = result.data[ in.id ];
             out.resize( in.samples.size() );
             for ( size_t i = 0; i < in.samples.size(); ++i )
@@ -150,10 +161,13 @@ void Dso5200DsoControl::onCoreFrame( const Dso5200Core::Frame &frame ) {
         // rotada desde el triggerPoint, así que el disparo queda a mitad del registro (medido: el
         // flanco de la CAL cae en la muestra ~5114 de 10240).
         result.triggeredPosition = (int)( samplesPerChannel / 2 );
-        if ( source == 1 && !result.data[ 1 ].empty() ) {
+        if ( source == 1 ) {
             // Disparo por software en CH2. Las muestras ya están en voltios en la punta (sonda e
             // inversión aplicadas), igual que el nivel de la GUI. Histéresis 0.1 div contra el ruido.
-            const int pos = findSoftwareTrigger( result.data[ 1 ], softLevel, 0.1 * settings[ 1 ].gain, rising );
+            // Sin flanco (o sin muestras de CH2) liveTrigger = false: la GUI marca "TR" en rojo.
+            const int pos = ch2Trigger.empty()
+                                ? -1
+                                : findSoftwareTrigger( ch2Trigger, softLevel, 0.1 * settings[ 1 ].gain, rising );
             result.liveTrigger = pos >= 0;
             if ( pos >= 0 )
                 result.triggeredPosition = std::max( pos, 1 ); // 0 significa "sin disparo" para la GUI
