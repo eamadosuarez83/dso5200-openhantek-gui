@@ -44,8 +44,9 @@ double measureFrequencyByCrossings( const std::vector< double > &samples, double
     };
 
     // Antirrebote: un cambio de nivel solo cuenta si se mantiene `kRun` muestras seguidas al otro lado
-    // de la histéresis. Así una muestra suelta errónea (p. ej. la primera del registro del DSO-5200,
-    // que a veces no corresponde a la señal) no se toma como flanco ni como nivel inicial.
+    // de la histéresis. Así una muestra suelta errónea (un pico de ruido; hasta dso5200basic 047ed81
+    // también la muestra 0 del registro, que era la última del búfer circular) no se toma como flanco
+    // ni como nivel inicial.
     constexpr size_t kRun = 3;
     auto side = [ & ]( double v ) { return v > mid + hyst ? 1 : ( v < mid - hyst ? -1 : 0 ); };
 
