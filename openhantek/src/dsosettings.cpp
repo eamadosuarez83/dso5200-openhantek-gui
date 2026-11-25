@@ -142,8 +142,6 @@ void DsoSettings::load() {
         scope.horizontal.recordLength = storeSettings->value( "recordLength" ).toInt();
     if ( storeSettings->contains( "samplerate" ) )
         scope.horizontal.samplerate = storeSettings->value( "samplerate" ).toDouble();
-    if ( storeSettings->contains( "calfreq" ) )
-        scope.horizontal.calfreq = storeSettings->value( "calfreq" ).toDouble();
     storeSettings->endGroup(); // horizontal
     // Trigger
     storeSettings->beginGroup( "trigger" );
@@ -155,8 +153,6 @@ void DsoSettings::load() {
         scope.trigger.slope = Dso::Slope( storeSettings->value( "slope" ).toUInt() );
     if ( storeSettings->contains( "source" ) )
         scope.trigger.source = storeSettings->value( "source" ).toInt();
-    if ( storeSettings->contains( "smooth" ) )
-        scope.trigger.smooth = storeSettings->value( "smooth" ).toInt();
     storeSettings->endGroup(); // trigger
     // Spectrum
     for ( ChannelID channel = 0; channel < scope.spectrum.size(); ++channel ) {
@@ -185,9 +181,6 @@ void DsoSettings::load() {
     }
     // Voltage
     bool defaultConfig = false;
-    // defaultConfig = deviceSpecification->isDemoDevice; // use default channel setting in demo mode
-    if ( storeSettings->contains( "hasACmodification" ) )
-        scope.hasACmodification = storeSettings->value( "hasACmodification" ).toBool();
     for ( ChannelID channel = 0; channel < scope.voltage.size(); ++channel ) {
         storeSettings->beginGroup( QString( "voltage%1" ).arg( channel ) );
         if ( storeSettings->contains( "gainStepIndex" ) )
@@ -196,7 +189,7 @@ void DsoSettings::load() {
             scope.voltage[ channel ].couplingOrMathIndex = storeSettings->value( "couplingOrMathIndex" ).toUInt();
             if ( channel < deviceSpecification->channels ) {
                 if ( scope.voltage[ channel ].couplingOrMathIndex >= deviceSpecification->couplings.size() ||
-                     ( !scope.hasACcoupling && !scope.hasACmodification ) )
+                     !scope.hasACcoupling )
                     scope.voltage[ channel ].couplingOrMathIndex = 0; // set to default if out of range
             } else {
                 if ( scope.voltage[ channel ].couplingOrMathIndex > unsigned( Dso::LastMathMode ) )
@@ -382,7 +375,6 @@ void DsoSettings::save() {
     storeSettings->setValue( "acquireInterval", scope.horizontal.acquireInterval );
     storeSettings->setValue( "recordLength", scope.horizontal.recordLength );
     storeSettings->setValue( "samplerate", scope.horizontal.samplerate );
-    storeSettings->setValue( "calfreq", scope.horizontal.calfreq );
     storeSettings->endGroup(); // horizontal
     // Trigger
     storeSettings->beginGroup( "trigger" );
@@ -390,7 +382,6 @@ void DsoSettings::save() {
     storeSettings->setValue( "position", scope.trigger.position );
     storeSettings->setValue( "slope", unsigned( scope.trigger.slope ) );
     storeSettings->setValue( "source", scope.trigger.source );
-    storeSettings->setValue( "smooth", scope.trigger.smooth );
     storeSettings->endGroup(); // trigger
     // Spectrum
     for ( ChannelID channel = 0; channel < scope.spectrum.size(); ++channel ) {
@@ -411,7 +402,6 @@ void DsoSettings::save() {
         storeSettings->endGroup(); // spectrum%1
     }
     // Voltage
-    storeSettings->setValue( "hasACmodification", scope.hasACmodification );
     for ( ChannelID channel = 0; channel < scope.voltage.size(); ++channel ) {
         storeSettings->beginGroup( QString( "voltage%1" ).arg( channel ) );
         storeSettings->setValue( "gainStepIndex", scope.voltage[ channel ].gainStepIndex );

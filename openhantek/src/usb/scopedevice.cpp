@@ -8,9 +8,8 @@
 #include "scopedevice.h"
 
 #include "hantekdso/dsomodel.h"
-#include "hantekprotocol/controlStructs.h"
-#include "hantekprotocol/controlcode.h"
-#include "models/modelDEMO.h"
+#include "modelregistry.h"
+#include "dso5200/modelDSO5200.h"
 
 #include <QCoreApplication>
 
@@ -62,7 +61,15 @@ ScopeDevice::ScopeDevice( DSOModel *model, libusb_device *device, unsigned findI
 }
 
 
-ScopeDevice::ScopeDevice() : model( new ModelDEMO ), device( nullptr ), uniqueUSBdeviceID( 0 ), realHW( false ) {}
+// Modo demo: un DSO-5200A simulado (el simulador de dso5200basic, ver Dso5200Core).
+static DSOModel *demoModel() {
+    for ( DSOModel *model : ModelRegistry::get()->models() )
+        if ( model->ID == ModelDSO5200A::ID )
+            return model;
+    return nullptr;
+}
+
+ScopeDevice::ScopeDevice() : model( demoModel() ), device( nullptr ), uniqueUSBdeviceID( 0 ), realHW( false ) {}
 
 
 bool ScopeDevice::connectDevice( QString &errorMessage ) {
@@ -180,138 +187,6 @@ bool ScopeDevice::needsFirmware() {
            descriptor.bcdDevice < model->firmwareVersion;
 }
 
-
-int ScopeDevice::bulkTransfer( unsigned char endpoint, const unsigned char *data, unsigned int length, int attempts,
-                               unsigned int timeout ) {
-    if ( !handle )
-        return LIBUSB_ERROR_NO_DEVICE;
-
-    int errorCode = LIBUSB_ERROR_TIMEOUT;
-    int transferred = 0;
-    for ( int attempt = 0; ( attempt < attempts || attempts == -1 ) && errorCode == LIBUSB_ERROR_TIMEOUT; ++attempt )
-        errorCode =
-            libusb_bulk_transfer( handle, endpoint, const_cast< unsigned char * >( data ), int( length ), &transferred, timeout );
-
-    if ( errorCode == LIBUSB_ERROR_NO_DEVICE )
-        disconnectFromDevice();
-    if ( errorCode < 0 )
-        return errorCode;
-    else
-        return transferred;
-}
-
-
-int ScopeDevice::bulkReadMulti( unsigned char *data, unsigned length, bool captureSmallBlocks, unsigned &received, int attempts ) {
-    if ( !handle || disconnected )
-        return LIBUSB_ERROR_NO_DEVICE;
-    int retCode = 0;
-    if ( verboseLevel > 6 )
-        qDebug() << "      ScopeDevice::bulkReadMulti()" << length;
-    if ( captureSmallBlocks ) { // used in roll mode
-        // slow data is read in smaller chunks to enable quick screen update
-        const unsigned packetLength = 512 * 78; // ~200 samples on screen (200x oversampling)
-        retCode = int( packetLength );
-        unsigned int packet;
-        received = 0;
-        for ( packet = 0; received < length && retCode == int( packetLength ); ++packet ) {
-            if ( hasStopped() )
-                break;
-            retCode = bulkTransfer( HANTEK_EP_IN, data + packet * packetLength, qMin( length - unsigned( received ), packetLength ),
-                                    attempts, HANTEK_TIMEOUT_MULTI * 10 );
-            if ( retCode > 0 )
-                received += unsigned( retCode );
-            if ( verboseLevel > 6 )
-                qDebug() << "      ScopeDevice::bulkReadMulti() bulkTransfer retCode" << retCode;
-        }
-        if ( verboseLevel > 6 )
-            qDebug() << "      scopeDevice::bulkReadMulti() packet, received" << packet << received;
-        if ( received > 0 )
-            retCode = int( received );
-        return retCode;
-    } else {
-        // more stable if fast data is read as one big block (up to 4 MB)
-        if ( hasStopped() )
-            return 0;
-        retCode = bulkTransfer( HANTEK_EP_IN, data, length, attempts, HANTEK_TIMEOUT_MULTI * length / inPacketLength );
-        if ( retCode < 0 )
-            received = 0;
-        else
-            received = unsigned( retCode );
-        stopTransfer = false;
-        return retCode;
-    }
-}
-
-
-// static QString hexString( unsigned char byte ) { return QString( "0x%1" ).arg( byte, 2, 16, QLatin1Char( '0' ) ); }
-
-static QString usbTypeString( int type ) {
-    QString t = "";
-    switch ( type & LIBUSB_REQUEST_TYPE_RESERVED ) {
-    case LIBUSB_REQUEST_TYPE_STANDARD:
-        t += "Standard";
-        break;
-    case LIBUSB_REQUEST_TYPE_CLASS:
-        t += "Class";
-        break;
-    case LIBUSB_REQUEST_TYPE_VENDOR:
-        t += "Vendor";
-        break;
-    case LIBUSB_REQUEST_TYPE_RESERVED:
-        t += "Reserved";
-        break;
-    }
-    switch ( type & LIBUSB_ENDPOINT_DIR_MASK ) {
-    case LIBUSB_ENDPOINT_OUT:
-        t += " Out";
-        break;
-    case LIBUSB_ENDPOINT_IN:
-        t += " In";
-        break;
-    }
-    return t;
-}
-
-
-static QString usbControlCode( uint8_t value ) {
-    if ( value >= 0xe0 && value <= 0xe6 )
-        return controlNames[ value - 0xe0 ];
-    else if ( value == uint8_t( ControlCode::CONTROL_INTERNAL ) )
-        return "INTERNAL";
-    else if ( value == uint8_t( ControlCode::CONTROL_EEPROM ) )
-        return "EEPROM";
-    else if ( value == uint8_t( ControlCode::CONTROL_MEMORY ) )
-        return "MEMORY";
-    else
-        return "0x" + QString::number( value, 16 );
-}
-
-// max control transfer (write) size is 64 bytes
-int ScopeDevice::controlTransfer( unsigned char type, unsigned char request, unsigned char *data, unsigned int length, int value,
-                                  int index, int attempts ) {
-    if ( !handle || disconnected )
-        return LIBUSB_ERROR_NO_DEVICE;
-
-    int errorCode = LIBUSB_ERROR_TIMEOUT;
-    for ( int attempt = 0; ( attempt < attempts || attempts == -1 ) && errorCode == LIBUSB_ERROR_TIMEOUT; ++attempt )
-        errorCode = libusb_control_transfer( handle, type, request, uint16_t( value ), uint16_t( index ), data, uint16_t( length ),
-                                             HANTEK_TIMEOUT );
-    if ( verboseLevel > 6 ) {
-        QDebug line = qDebug().noquote() << "      ScopeDevice::controlTransfer()" << usbTypeString( type )
-                                         << usbControlCode( request );
-        line << value << index << '{';
-        for ( unsigned iii = 0; iii < length; ++iii ) {
-            if ( length > 8 && 0 == iii % 16 )
-                line << "\n     ";
-            line << QString::number( data[ iii ], 16 );
-        }
-        line << "} =" << errorCode;
-    }
-
-    if ( errorCode == LIBUSB_ERROR_NO_DEVICE )
-        disconnectFromDevice();
-    return errorCode;
-}
 
 
 QString ScopeDevice::readUSBdescriptor( libusb_device_handle *handle, uint8_t index ) {

@@ -719,7 +719,7 @@ void DsoWidget::updateTriggerDetails() {
         int dutyCyle = int( 0.5 + ( 100.0 * pulseWidth1 ) / ( pulseWidth1 + pulseWidth2 ) );
         pulseWidthString += " (" + QString::number( dutyCyle ) + "%)";
     }
-    if ( !scope->liveCalibrationActive && scope->trigger.mode != Dso::TriggerMode::ROLL ) {
+    if ( scope->trigger.mode != Dso::TriggerMode::ROLL ) {
         settingsTriggerLabel->setText( tr( "%1  %2  %3  %4  %5" )
                                            .arg( scope->voltage[ unsigned( scope->trigger.source ) ].name,
                                                  Dso::slopeString( scope->trigger.slope ), levelString, pretriggerString,
@@ -953,13 +953,7 @@ void DsoWidget::showNew( std::shared_ptr< PPresult > analysedData ) {
     zoomScope->showData( analysedData );
 
     QPalette triggerLabelPalette = palette();
-    if ( scope->liveCalibrationActive ) {
-        swTriggerStatus->setText( tr( "<b> OFFSET CALIBRATION </b>" ) );
-        triggerLabelPalette.setColor( QPalette::WindowText, Qt::black );
-        triggerLabelPalette.setColor( QPalette::Window, Qt::red );
-        swTriggerStatus->setPalette( triggerLabelPalette );
-        swTriggerStatus->setVisible( true );
-    } else if ( scope->trigger.mode == Dso::TriggerMode::ROLL ) {
+    if ( scope->trigger.mode == Dso::TriggerMode::ROLL ) {
         swTriggerStatus->setVisible( false );
     } else {
         swTriggerStatus->setText( tr( "TR" ) );

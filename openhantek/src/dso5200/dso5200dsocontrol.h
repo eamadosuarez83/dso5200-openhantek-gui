@@ -11,8 +11,8 @@
 //  - convierte cada captura del núcleo en DSOsamples (multiplicando por la sonda, inversión de canal,
 //    bit de recorte y posición del disparo por hardware);
 //  - dispara CH2 por software (el aparato solo dispara desde CH1);
-//  - rechaza con UNSUPPORTED lo que el núcleo todavía no ofrece (
-//    modos NORMAL/SINGLE, mover el punto de disparo, generador de calibración, calibración EEPROM).
+//  - calcula el canal MATH (MathChannel de la GUI);
+//  - en modo demo usa el simulador de dso5200basic en vez del aparato.
 
 #pragma once
 
@@ -24,6 +24,7 @@
 #include "idsocontrol.h"
 
 #include "hantekdso/dsosamples.h"
+#include "hantekdso/mathchannel.h"
 #include "scopesettings.h"
 
 class ScopeDevice;
@@ -48,8 +49,6 @@ class Dso5200DsoControl : public IDsoControl {
     bool isDeviceAvailable() const override;
     const DSOModel *getModel() const override { return model; }
 
-    Dso::ErrorCode stringCommand( const QString &commandString ) override;
-
     void quitSampling() override;
     void prepareForShutdown() override {}
 
@@ -64,16 +63,13 @@ class Dso5200DsoControl : public IDsoControl {
     Dso::ErrorCode setCoupling( ChannelID channel, Dso::Coupling coupling ) override;
     Dso::ErrorCode setTriggerMode( Dso::TriggerMode mode ) override;
     Dso::ErrorCode setTriggerSource( int channel ) override;
-    Dso::ErrorCode setTriggerSmooth( int smooth ) override;
     Dso::ErrorCode setTriggerLevel( ChannelID channel, double level ) override;
     Dso::ErrorCode setTriggerSlope( Dso::Slope slope ) override;
     Dso::ErrorCode setTriggerPosition( double position ) override;
-    Dso::ErrorCode setCalFreq( double calfreq = 0.0 ) override;
     void applySettings( const DsoSettingsScope *scope ) override;
     void parkForReconnect() override;
     void rebindDevice( ScopeDevice *newScopeDevice ) override;
     void restartSampling() override;
-    void calibrateOffset( bool enable ) override;
 
   private:
     static constexpr unsigned kChannels = 2;
@@ -119,4 +115,6 @@ class Dso5200DsoControl : public IDsoControl {
     int debugChannel = -1; ///< DSO5200_CAL
 
     DSOsamples result;
+    const DsoSettingsScope *scopeSettings = nullptr; ///< de la GUI; lo usa el canal MATH
+    std::unique_ptr< MathChannel > mathChannel;
 };

@@ -2,10 +2,10 @@
 
 project(OpenHantek CXX)
 
+# Este fork (DSO-5200/5200A) solo se compila en Linux: la compilación para Windows del upstream
+# dependía de los drivers y DLL del 6022, que se quitaron.
 if(WIN32)
-    set(CMAKE_FIND_LIBRARY_SUFFIXES ".a")
-    set(CMAKE_EXE_LINKER_FLAGS "-s")
-    set(EXECTYPE WIN32)
+    message(FATAL_ERROR "dso5200-openhantek solo se compila en Linux")
 endif()
 
 
@@ -51,7 +51,7 @@ option(BUILD_MACOSX_BUNDLE "Build MacOS app bundle" ON)
 if( APPLE AND BUILD_MACOSX_BUNDLE )
     set( EXECTYPE MACOSX_BUNDLE )
     set( MACOSX_BUNDLE_BUNDLE_NAME "${PROJECT_NAME}" )
-    set( MACOSX_BUNDLE_INFO_STRING "Digital oscilloscope software for Hantek DSO6022" )
+    set( MACOSX_BUNDLE_INFO_STRING "Digital oscilloscope software for Hantek DSO-5200/5200A" )
     set( MACOSX_BUNDLE_GUI_IDENTIFIER "org.openhantek.${PROJECT_NAME}" )
     set( MACOSX_BUNDLE_SHORT_VERSION_STRING ${VCS_REVISION} )
     set( MACOSX_BUNDLE_BUNDLE_VERSION ${VERSION} )
@@ -72,13 +72,7 @@ if( APPLE AND BUILD_MACOSX_BUNDLE )
 endif()
 target_compile_features(${PROJECT_NAME} PRIVATE cxx_range_for)
 
-if(MSVC)
-    include(../cmake/fftw_on_windows.cmake)
-    include(../cmake/libusb_on_windows.cmake)
-    include(../cmake/copy_qt6_dlls_to_bin_dir.cmake)
-    target_compile_options(${PROJECT_NAME} PRIVATE "/W4" "/wd4251" "/wd4127" "/wd4275" "/wd4200" "/nologo" "/J" "/Zi")
-    target_compile_options(${PROJECT_NAME} PRIVATE "$<$<CONFIG:DEBUG>:/MDd>")
-else()
+if(TRUE)
     if( APPLE AND BUILD_MACOSX_BUNDLE )
         # Use own template that defines NSPrincipalClass=NSApplication & NSHighResolutionCapable=True
         set_target_properties( ${PROJECT_NAME} PROPERTIES
@@ -113,6 +107,7 @@ endif()
 add_library(dso5200core STATIC
     dso5200core/dso5200core.cpp
     ${DSO5200BASIC_DIR}/src/device/dso5200.cpp
+    ${DSO5200BASIC_DIR}/src/device/simulator.cpp
     ${DSO5200BASIC_DIR}/src/usb/usbdevice.cpp
     ${DSO5200BASIC_DIR}/src/protocol/bulkcommand.cpp
     ${DSO5200BASIC_DIR}/src/protocol/bulkStructs.cpp
@@ -127,8 +122,9 @@ if(NOT MSVC)
     # de libusb que son correctas. Se silencia solo en el núcleo.
     target_compile_options(dso5200core PRIVATE -Wno-deprecated-enum-enum-conversion)
 endif()
-# La GUI también define el namespace `Hantek` (protocolo 6022) y una `libUsbErrorString(int)` global
-# que solo difiere en el tipo de retorno: se renombran en el núcleo para que no choquen al enlazar.
+# La GUI define una `libUsbErrorString(int)` global que solo difiere en el tipo de retorno de la del
+# núcleo: se renombra en el núcleo para que no choquen al enlazar. (`Hantek` se renombraba porque el
+# protocolo del 6022 usaba el mismo namespace; ya no existe, se deja por si acaso.)
 target_compile_definitions(dso5200core PRIVATE Hantek=Hantek5200core libUsbErrorString=dso5200core_libUsbErrorString)
 if(NOT MSVC)
     target_include_directories(dso5200core PRIVATE ${LIBUSB_INCLUDE_DIRS})
@@ -136,11 +132,6 @@ if(NOT MSVC)
 endif()
 target_include_directories(${PROJECT_NAME} PRIVATE dso5200core)
 target_link_libraries(${PROJECT_NAME} dso5200core)
-
-if(WIN32)
-    include(../cmake/docs_on_windows.cmake)
-    include(../cmake/windows_driver.cmake)
-endif()
 
 # install commands
 if ( NOT (APPLE AND BUILD_MACOSX_BUNDLE) )

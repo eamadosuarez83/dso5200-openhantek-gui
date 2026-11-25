@@ -51,7 +51,6 @@ class MainWindow : public QMainWindow {
     Ui::MainWindow *ui;
     QIcon iconPause;
     QIcon iconPlay;
-    QLineEdit *commandEdit = nullptr;
     QString lastSaveAsDir = "";
 
     // Central widgets

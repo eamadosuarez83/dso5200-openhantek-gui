@@ -63,14 +63,11 @@ std::unique_ptr< ScopeDevice > SelectSupportedDevice::showSelectDeviceModal( lib
                                      "user manual</a> for safe operation.</p>" )
                                      .arg( userManualPath );
 
-    QString messageNoDevices = tr( "<p>OpenHantek6022 is searching for compatible devices ...</p>"
-                                   "<p><img align='right' height='150' src=':/switch_6022BL.png'>"
-                                   "Don't forget to switch your device into oscilloscope mode if it has multiple modes.</p>" );
-#if defined( Q_OS_WIN )
-    messageNoDevices += tr( "<p>Please make sure you have installed the windows usb driver correctly</p>" );
-#elif defined( Q_OS_LINUX )
-    QFile libRules( "/usr/lib/udev/rules.d/60-openhantek.rules" );
-    QFile etcRules( "/etc/udev/rules.d/60-openhantek.rules" );
+    QString messageNoDevices = tr( "<p>Searching for a DSO-5200/5200A ...</p>"
+                                   "<p>Check that the oscilloscope is switched on and its USB cable is connected.</p>" );
+#if defined( Q_OS_LINUX )
+    QFile libRules( "/usr/lib/udev/rules.d/60-dso5200.rules" );
+    QFile etcRules( "/etc/udev/rules.d/60-dso5200.rules" );
     if ( !libRules.exists() && !etcRules.exists() ) {
         messageNoDevices += tr( "<p>Please make sure you have copied the udev rules file to<br/>"
                                 "<b>%1</b> or<br/><b>%2</b><br/>"

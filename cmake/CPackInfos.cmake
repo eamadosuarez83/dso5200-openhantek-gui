@@ -28,15 +28,8 @@ if (UNIX)
         set(CPACK_TARGET "")
         set(CPACK_GENERATOR ${CPACK_GENERATOR} DEB RPM)
         install(
-            FILES utils/udev_rules/60-openhantek.rules
+            FILES utils/udev_rules/60-dso5200.rules
             DESTINATION lib/udev/rules.d
-        )
-    elseif(CMAKE_SYSTEM_NAME MATCHES "FreeBSD")
-        set(CPACK_TARGET "freebsd_")
-        set(CPACK_PACKAGING_INSTALL_PREFIX "/usr/local")
-        install(
-            FILES utils/devd_rules_freebsd/openhantek.conf
-            DESTINATION etc/devd
         )
     elseif(APPLE)
         set(CPACK_TARGET "macos_")
@@ -82,7 +75,7 @@ message(STATUS "CPACK_ARCH: ${CPACK_ARCH}")
 
 set(CPACK_PACKAGE_CONTACT "contact@openhantek.org")
 set(CPACK_PACKAGE_VENDOR "OpenHantek Community")
-set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Digital oscilloscope software for Hantek DSO6022 USB hardware")
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Digital oscilloscope software for Hantek DSO-5200/5200A USB hardware")
 set(CPACK_PACKAGE_DESCRIPTION "OpenHantek is an oscilloscope software for\nVoltcraft/Darkwire/Protek/Acetech/Hantek USB devices")
 set(CPACK_RESOURCE_FILE_README "${CMAKE_SOURCE_DIR}/README.md")
 if (EXISTS "${CMAKE_SOURCE_DIR}/LICENSE")

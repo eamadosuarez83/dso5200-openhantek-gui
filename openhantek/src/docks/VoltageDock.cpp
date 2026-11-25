@@ -27,7 +27,7 @@ VoltageDock::VoltageDock( DsoSettingsScope *scope, const Dso::ControlSpecificati
 
     // Initialize lists for comboboxes
     for ( Dso::Coupling c : spec->couplings )
-        if ( c == Dso::Coupling::DC || scope->hasACcoupling || scope->hasACmodification )
+        if ( c == Dso::Coupling::DC || scope->hasACcoupling )
             couplingStrings.append( Dso::couplingString( c ) );
 
     for ( auto e : Dso::MathModeEnum ) {

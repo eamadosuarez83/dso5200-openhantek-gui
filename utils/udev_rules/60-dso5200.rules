@@ -1,0 +1,21 @@
+# udev rules for the Hantek DSO-5200/5200A, filtered from OpenHantek's
+# firmware/60-hantek.rules (only the 5200/5200A VID:PID pairs, pre- and
+# post-firmware). Grants the logged-in user access without root.
+#
+# IMPORTANT: the filename number matters. The TAG+="uaccess" set here only
+# takes effect if this file is processed *before*
+# /usr/lib/udev/rules.d/73-seat-late.rules (which is what actually turns the
+# "uaccess" tag into a real ACL grant, via RUN{builtin}+="uaccess"). Keep this
+# file numbered below 73 (matching upstream OpenHantek's own 60-hantek.rules) —
+# renaming it to e.g. 99-dso5200.rules silently breaks permissions, since the
+# ACL-granting rule will have already run by the time the tag is set.
+#
+# Install: sudo cp 60-dso5200.rules /etc/udev/rules.d/ && sudo udevadm control --reload-rules
+
+# Hantek DSO-5200
+SUBSYSTEM=="usb", ACTION=="add", ENV{DEVTYPE}=="usb_device", ATTRS{idVendor}=="04b5", ATTRS{idProduct}=="5200", TAG+="uaccess", TAG+="udev-acl"
+SUBSYSTEM=="usb", ACTION=="add", ENV{DEVTYPE}=="usb_device", ATTRS{idVendor}=="04b4", ATTRS{idProduct}=="5200", TAG+="uaccess", TAG+="udev-acl"
+
+# Hantek DSO-5200A
+SUBSYSTEM=="usb", ACTION=="add", ENV{DEVTYPE}=="usb_device", ATTRS{idVendor}=="04b5", ATTRS{idProduct}=="520a", TAG+="uaccess", TAG+="udev-acl"
+SUBSYSTEM=="usb", ACTION=="add", ENV{DEVTYPE}=="usb_device", ATTRS{idVendor}=="04b4", ATTRS{idProduct}=="520a", TAG+="uaccess", TAG+="udev-acl"

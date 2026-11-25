@@ -83,9 +83,6 @@ DsoConfigScopePage::DsoConfigScopePage( DsoSettings *settings, QWidget *parent )
     defaultSettingsCheckBox = new QCheckBox( tr( "Apply default settings after next restart" ) );
     defaultSettingsCheckBox->setChecked( 0 == settings->configVersion );
     saveNowButton = new QPushButton( tr( "Save settings now" ) );
-    hasACmodificationCheckBox =
-        new QCheckBox( tr( "Scope has hardware modification for AC coupling (restart needed to apply the change)" ) );
-    hasACmodificationCheckBox->setChecked( settings->scope.hasACmodification );
     toolTipVisibleCheckBox = new QCheckBox( tr( "Show tooltips for user interface (restart needed to apply the change)" ) );
     toolTipVisibleCheckBox->setChecked( settings->scope.toolTipVisible );
     doNotTranslateCheckBox = new QCheckBox( tr( "Use the international interface (restart needed to apply the change)" ) );
@@ -97,11 +94,6 @@ DsoConfigScopePage::DsoConfigScopePage( DsoSettings *settings, QWidget *parent )
     configurationLayout->addWidget( defaultSettingsCheckBox, ++row, 0, 1, 2 );
     configurationLayout->addWidget( toolTipVisibleCheckBox, ++row, 0, 1, 2 );
     configurationLayout->addWidget( doNotTranslateCheckBox, ++row, 0, 1, 2 );
-    if ( settings->scope.hasACcoupling ) {
-        hasACmodificationCheckBox->setChecked( true ); // check but do not show the box
-    } else {
-        configurationLayout->addWidget( hasACmodificationCheckBox, ++row, 0, 1, 2 ); // show it
-    }
     configurationGroup = new QGroupBox( tr( "Configuration" ) );
     configurationGroup->setLayout( configurationLayout );
 
@@ -118,7 +110,6 @@ DsoConfigScopePage::DsoConfigScopePage( DsoSettings *settings, QWidget *parent )
 
 /// \brief Saves the new settings.
 void DsoConfigScopePage::saveSettings() {
-    settings->scope.hasACmodification = hasACmodificationCheckBox->isChecked();
     settings->scope.toolTipVisible = toolTipVisibleCheckBox->isChecked();
     settings->scope.doNotTranslate = doNotTranslateCheckBox->isChecked();
     settings->scope.horizontal.maxTimebase = maxTimebaseSiSpinBox->value();

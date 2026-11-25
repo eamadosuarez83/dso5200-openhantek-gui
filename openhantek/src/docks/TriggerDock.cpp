@@ -28,9 +28,6 @@ TriggerDock::TriggerDock( DsoSettingsScope *scope, const Dso::ControlSpecificati
     // Initialize lists for comboboxes
     for ( ChannelID channel = 0; channel < mSpec->channels; ++channel )
         sourceStandardStrings << tr( "CH%1" ).arg( channel + 1 );
-    sourceStandardStrings << tr( "MATH" );
-    // add "smooth" source
-    smoothStandardStrings << tr( "HF" ) << tr( "Normal" ) << tr( "LF" );
 
     // Initialize elements
     modeLabel = new QLabel( tr( "Mode" ) );
@@ -50,12 +47,8 @@ TriggerDock::TriggerDock( DsoSettingsScope *scope, const Dso::ControlSpecificati
     sourceLabel = new QLabel( tr( "Source" ) );
     sourceComboBox = new QComboBox();
     if ( scope->toolTipVisible )
-        sourceComboBox->setToolTip( tr( "Select the trigger channel (CH1, CH2, or MATH)" ) );
+        sourceComboBox->setToolTip( tr( "Select the trigger channel (CH1 by hardware, CH2 by software)" ) );
     sourceComboBox->addItems( sourceStandardStrings );
-    smoothComboBox = new QComboBox();
-    if ( scope->toolTipVisible )
-        smoothComboBox->setToolTip( tr( "Trigger on fast, normal, or slow signals" ) );
-    smoothComboBox->addItems( smoothStandardStrings );
 
     dockLayout = new QGridLayout();
     dockLayout->setColumnMinimumWidth( 0, 50 );
@@ -67,8 +60,7 @@ TriggerDock::TriggerDock( DsoSettingsScope *scope, const Dso::ControlSpecificati
     dockLayout->addWidget( sourceLabel, 1, 0 );
     dockLayout->addWidget( sourceComboBox, 1, 1, 1, 2 ); // fill 1 row, 2 col
     dockLayout->addWidget( slopeLabel, 2, 0 );
-    dockLayout->addWidget( slopeComboBox, 2, 1 );
-    dockLayout->addWidget( smoothComboBox, 2, 2 );
+    dockLayout->addWidget( slopeComboBox, 2, 1, 1, 2 );
 
     dockWidget = new QWidget();
     SetupDockWidget( this, dockWidget, dockLayout );
@@ -92,35 +84,15 @@ TriggerDock::TriggerDock( DsoSettingsScope *scope, const Dso::ControlSpecificati
                  this->scope->trigger.source = index;
                  emit sourceChanged( index );
              } );
-    connect( smoothComboBox, static_cast< void ( QComboBox::* )( int ) >( &QComboBox::currentIndexChanged ), this,
-             [ this ]( int index ) {
-                 this->scope->trigger.smooth = index;
-                 emit smoothChanged( index );
-             } );
 }
 
 void TriggerDock::loadSettings( DsoSettingsScope *scope ) {
     if ( scope->verboseLevel > 2 )
         qDebug() << "  TDock::loadSettings()";
     // Set values
-    if ( scope->trigger.mode != Dso::TriggerMode::ROLL && scope->horizontal.timebase < 0.2 ) // remove ROLL mode
-        modeComboBox->setMaxCount( int( mSpec->triggerModes.size() ) - 1 );
     setMode( scope->trigger.mode );
     setSlope( scope->trigger.slope );
     setSource( scope->trigger.source );
-    setSmooth( scope->trigger.smooth );
-}
-
-
-void TriggerDock::timebaseChanged( double timebase ) { // provide ROLL mode only if samplerate > 100 ms/div
-    if ( scope->trigger.mode == Dso::TriggerMode::ROLL )
-        return;
-    if ( timebase > 0.1 && modeComboBox->count() == int( mSpec->triggerModes.size() ) - 1 ) { // add ROLL mode
-        modeComboBox->setMaxCount( int( mSpec->triggerModes.size() ) );
-        modeComboBox->addItem( Dso::triggerModeString( Dso::TriggerMode( mSpec->triggerModes.size() - 1 ) ) );
-    } else if ( timebase <= 0.1 ) { // remove ROLL mode
-        modeComboBox->setMaxCount( int( mSpec->triggerModes.size() ) - 1 );
-    }
 }
 
 
@@ -157,11 +129,3 @@ void TriggerDock::setSource( int id ) {
     sourceComboBox->setCurrentIndex( id );
 }
 
-void TriggerDock::setSmooth( int smooth ) {
-    if ( scope->verboseLevel > 2 )
-        qDebug() << "  TDock::setSmooth()" << smooth;
-    if ( int( smooth ) >= smoothStandardStrings.count() )
-        return;
-    QSignalBlocker blocker( smoothComboBox );
-    smoothComboBox->setCurrentIndex( int( smooth ) );
-}

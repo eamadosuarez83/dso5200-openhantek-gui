@@ -53,18 +53,12 @@
      <string>&amp;Oscilloscope</string>
     </property>
     <addaction name="actionSettings"/>
-    <addaction name="separator"/>
-    <addaction name="actionCalibrateOffset"/>
-    <addaction name="separator"/>
-    <addaction name="actionManualCommand"/>
    </widget>
    <widget class="QMenu" name="menuHelp">
     <property name="title">
      <string>&amp;Help</string>
     </property>
     <addaction name="actionUserManual"/>
-    <addaction name="actionACmodification"/>
-    <addaction name="actionFrequencyGeneratorModification"/>
     <addaction name="separator"/>
     <addaction name="actionAbout"/>
     <addaction name="actionAboutQt"/>
@@ -207,32 +201,6 @@
   <action name="actionSettings">
    <property name="text">
     <string>&amp;Settings ..</string>
-   </property>
-  </action>
-  <action name="actionCalibrateOffset">
-   <property name="checkable">
-    <bool>true</bool>
-   </property>
-   <property name="text">
-    <string>Calibrate &amp;Offset</string>
-   </property>
-  </action>
-  <action name="actionManualCommand">
-   <property name="checkable">
-    <bool>true</bool>
-   </property>
-   <property name="text">
-    <string>&amp;Manual command</string>
-   </property>
-  </action>
-  <action name="actionACmodification">
-   <property name="text">
-    <string>AC &amp;Modification</string>
-   </property>
-  </action>
-  <action name="actionFrequencyGeneratorModification">
-   <property name="text">
-    <string>&amp;Frequency Generator Modification</string>
    </property>
   </action>
  </widget>

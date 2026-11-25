@@ -7,7 +7,6 @@
 
 #include "hantekdso/controlspecification.h"
 #include "hantekdso/enums.h"
-#include "hantekprotocol/definitions.h"
 #include "viewconstants.h"
 #include <vector>
 
@@ -36,7 +35,6 @@ struct DsoSettingsScopeHorizontal {
 #endif
     double samplerate = 1e6; ///< The samplerate of the oscilloscope in S
     int dotsOnScreen = 0;
-    double calfreq = 1e3; ///< The frequency of the calibration output
 };
 
 /// \brief Holds the settings for the trigger.
@@ -46,7 +44,6 @@ struct DsoSettingsScopeTrigger {
     double position = 0.5;                          ///< Horizontal position for pretrigger (middle of screen)
     Dso::Slope slope = Dso::Slope::Positive;        ///< Rising or falling edge causes trigger
     int source = 0;                                 ///< Channel that is used as trigger source
-    int smooth = 0;                                 ///< Don't trigger on glitches
 };
 
 /// \brief Base for DsoSettingsScopeSpectrum and DsoSettingsScopeVoltage
@@ -113,8 +110,6 @@ struct DsoSettingsScope {
     bool doNotTranslate = false;
     bool histogram = false;
     bool hasACcoupling = false;
-    bool hasACmodification = false;
-    bool liveCalibrationActive = false;
 
     double gain( unsigned channel ) const {
         if ( channel < voltage.size() - 1 ) // Voltage channel
