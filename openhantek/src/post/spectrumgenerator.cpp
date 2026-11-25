@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <algorithm>
 #include <cmath>
 
 #include <QColor>
@@ -8,6 +9,7 @@
 #include <QTimer>
 #include <QToolTip>
 
+#include "frequencymeter.h"
 #include "ppresult.h"
 #include "spectrumgenerator.h"
 
@@ -392,7 +394,18 @@ void SpectrumGenerator::process( PPresult *result ) {
         channelData->dBmax = max;
 
         // Calculate both peak frequencies (correlation and spectrum) in Hz
-        double pF = channelData->spectrum.interval * peakFreqPos;
+        // El pico se afina interpolando una parábola sobre los tres valores en dB alrededor del máximo
+        // (en vez de quedarse en el centro del bin, cuya resolución es muestreo/muestras).
+        double peakFreqBin = peakFreqPos;
+        if ( peakFreqPos > 0 && peakFreqPos < dftLength ) {
+            const double a = channelData->spectrum.samples[ size_t( peakFreqPos - 1 ) ];
+            const double b = channelData->spectrum.samples[ size_t( peakFreqPos ) ];
+            const double c = channelData->spectrum.samples[ size_t( peakFreqPos + 1 ) ];
+            const double den = a - 2 * b + c;
+            if ( den < 0 )
+                peakFreqBin += std::clamp( 0.5 * ( a - c ) / den, -0.5, 0.5 );
+        }
+        double pF = channelData->spectrum.interval * peakFreqBin;
         double pC = 1.0 / ( channelData->voltage.interval * peakCorrPos );
         if ( scope->verboseLevel > 5 )
             qDebug() << "     SpectrumGenerator::process()" << channel << "freq:" << peakFreqPos << pF << "corr:" << peakCorrPos
@@ -404,6 +417,14 @@ void SpectrumGenerator::process( PPresult *result ) {
         } else { // otherwise fall back to correlation
             channelData->frequency = pC;
         }
+        // Medición en el dominio del tiempo (cruces del nivel medio): mucho más precisa que la FFT y la
+        // autocorrelación, sobre todo con pocos ciclos en el registro. Si la señal no tiene periodos
+        // regulares, se queda el resultado de la FFT/autocorrelación.
+        const double fT = measureFrequencyByCrossings( channelData->voltage.samples, channelData->voltage.interval );
+        if ( scope->verboseLevel > 5 )
+            qDebug() << "     SpectrumGenerator::process()" << channel << "freq cruces:" << fT;
+        if ( fT > 0 )
+            channelData->frequency = fT;
         if ( scope->analysis.showNoteValue )
             channelData->note = calculateNote( channelData->frequency );
         else
