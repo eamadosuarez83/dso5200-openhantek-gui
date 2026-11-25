@@ -6,6 +6,7 @@
 #include <QElapsedTimer>
 #include <QLibraryInfo>
 #include <QLocale>
+#include <QRegularExpression>
 #include <QStyleFactory>
 #include <QSurfaceFormat>
 #include <QTranslator>

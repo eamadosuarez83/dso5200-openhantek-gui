@@ -13,12 +13,8 @@
 struct libusb_context;
 
 /**
- * Offers the user a device selection dialog. If you call any of the -Modal methods,
- * the method will block and show a dialog for selection or for a usb error
- * message. The method returns as soon as the user closes the dialog.
- *
- * An example to get a user selected device:
- * std::unique_ptr<USBDevice> device = SelectDevice().showSelectDeviceModal(context, ...);
+ * Ventana de arranque: busca el DSO-5200/5200A, le carga el firmware y se conecta sola cuando está
+ * listo. Sin aparato ofrece el modo demo. Los métodos -Modal bloquean hasta que se cierra la ventana.
  */
 class SelectSupportedDevice : public QDialog {
     Q_OBJECT
@@ -29,8 +25,6 @@ class SelectSupportedDevice : public QDialog {
     void showLibUSBFailedDialogModel( int error );
 
   private:
-    void updateDeviceList();
-    void updateSupportedDevices();
     std::unique_ptr< Ui::SelectSupportedDevice > ui;
     UniqueUSBid selectedDevice = 0;
     bool demoModeClicked = false;
