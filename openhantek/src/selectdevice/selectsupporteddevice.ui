@@ -11,7 +11,7 @@
    </rect>
   </property>
   <property name="windowTitle">
-   <string>Select device</string>
+   <string>DSO-5200</string>
   </property>
   <layout class="QVBoxLayout" name="verticalLayout">
    <item>
@@ -30,9 +30,6 @@
         </property>
        </spacer>
       </item>
-      <item row="1" column="0" colspan="2">
-       <widget class="QComboBox" name="cmbDevices"/>
-      </item>
       <item row="3" column="0" colspan="2">
        <widget class="QLabel" name="labelReadyState">
         <property name="text">
@@ -43,29 +40,6 @@
         </property>
         <property name="openExternalLinks">
          <bool>true</bool>
-        </property>
-       </widget>
-      </item>
-      <item row="0" column="1">
-       <widget class="QLabel" name="labelSupportedDevices">
-        <property name="text">
-         <string>...</string>
-        </property>
-        <property name="wordWrap">
-         <bool>true</bool>
-        </property>
-       </widget>
-      </item>
-      <item row="0" column="0">
-       <widget class="QLabel" name="label">
-        <property name="sizePolicy">
-         <sizepolicy hsizetype="Fixed" vsizetype="Preferred">
-          <horstretch>0</horstretch>
-          <verstretch>0</verstretch>
-         </sizepolicy>
-        </property>
-        <property name="text">
-         <string>Devices:</string>
         </property>
        </widget>
       </item>

@@ -40,13 +40,16 @@ class Dso5200Core {
 
     /// No abre nada todavía; ver open().
     Dso5200Core( libusb_device *device, long vendorID, long productID, const std::string &name, bool debugLog );
+    /// Modo demo: sin aparato, las capturas salen del simulador de dso5200basic (src/device/simulator).
+    Dso5200Core();
+    bool isDemo() const;
     ~Dso5200Core();
     Dso5200Core( const Dso5200Core & ) = delete;
     Dso5200Core &operator=( const Dso5200Core & ) = delete;
 
     /// Abre su propia conexión USB al dispositivo (ya con firmware) y arranca el hilo de captura del
     /// núcleo. La conexión de la GUI a ese dispositivo debe estar cerrada antes: el interfaz USB solo
-    /// puede reclamarlo una conexión.
+    /// puede reclamarlo una conexión. En modo demo arranca el simulador.
     bool open( std::string &errorMessage );
     bool isConnected() const;
 

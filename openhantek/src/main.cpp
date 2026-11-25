@@ -6,6 +6,7 @@
 #include <QElapsedTimer>
 #include <QLibraryInfo>
 #include <QLocale>
+#include <QRegularExpression>
 #include <QStyleFactory>
 #include <QSurfaceFormat>
 #include <QTranslator>
@@ -32,16 +33,13 @@
 #include "viewsettings.h"
 
 // DSO core logic
-#include "capturing.h"
 #include "dsomodel.h"
-#include "hantekdsocontrol.h"
 #include "usb/devicereconnectionsupervisor.h"
 #include "usb/scopedevice.h"
 
-// DSO-5200/5200A control (replaces HantekDsoControl for that model - see dso5200/idsocontrol.h)
+// Control del DSO-5200/5200A (protocolo de dso5200basic, ver dso5200/dso5200dsocontrol.h)
 #include "dso5200/dso5200dsocontrol.h"
 #include "dso5200/idsocontrol.h"
-#include "dso5200/modelDSO5200.h"
 
 // Post processing
 #include "post/graphgenerator.h"
@@ -63,7 +61,6 @@
 
 #include "OH_VERSION.h"
 
-using namespace Hantek;
 
 // verboseLevel allows the fine granulated tracing of the program for easy testing and debugging
 int verboseLevel = 0; // 0: quiet; 1,2: startup; 3,4: + user actions; 5,6: + data processing; 7 + USB
@@ -88,6 +85,8 @@ int main( int argc, char *argv[] ) {
     //////// Set application information ////////
     QCoreApplication::setOrganizationName( "OpenHantek" );
     QCoreApplication::setOrganizationDomain( "openhantek.org" );
+    // Se mantiene el nombre del upstream: de él sale la ruta de los ajustes globales (abajo); cambiarlo
+    // haría perder la configuración guardada.
     QCoreApplication::setApplicationName( "OpenHantek6022" );
     QCoreApplication::setApplicationVersion( VERSION );
 
@@ -396,16 +395,9 @@ int main( int argc, char *argv[] ) {
     QThread dsoControlThread;
     dsoControlThread.setObjectName( "dsoControlThread" );
 
-    // The DSO-5200/5200A uses its own protocol and capture state machine (see
-    // dso5200/dso5200dsocontrol.h for why this isn't just another HantekDsoControl model);
-    // every other supported model keeps using the original HantekDsoControl unchanged.
-    const bool isDso5200 = model->ID == ModelDSO5200::ID || model->ID == ModelDSO5200A::ID;
-    std::unique_ptr< IDsoControl > dsoControlPtr;
-    if ( isDso5200 )
-        dsoControlPtr =
-            std::unique_ptr< IDsoControl >( new Dso5200DsoControl( scopeDevice.get(), model, verboseLevel ) );
-    else
-        dsoControlPtr = std::unique_ptr< IDsoControl >( new HantekDsoControl( scopeDevice.get(), model, verboseLevel ) );
+    // Único control: DSO-5200/5200A (real o, en modo demo, el simulador de dso5200basic).
+    std::unique_ptr< IDsoControl > dsoControlPtr(
+        new Dso5200DsoControl( scopeDevice.get(), model, verboseLevel ) );
     IDsoControl &dsoControl = *dsoControlPtr;
 
     dsoControl.moveToThread( &dsoControlThread );
@@ -452,8 +444,7 @@ int main( int argc, char *argv[] ) {
     PostProcessing postProcessing( settings.scope.countChannels(), verboseLevel );
 
     SpectrumGenerator spectrumGenerator( &settings.scope, &settings.analysis );
-    // math channel is now calculated in HantekDsoControl
-    // MathChannelGenerator mathchannelGenerator( &settings.scope, spec->channels );
+    // el canal MATH lo calcula Dso5200DsoControl
     GraphGenerator graphGenerator( &settings.scope, &settings.view );
 
     postProcessing.registerProcessor( &samplesToExportRaw );
@@ -550,15 +541,7 @@ int main( int argc, char *argv[] ) {
     dsoControl.enableSamplingUI();
     postProcessingThread.start();
     dsoControlThread.start();
-    // CapturingThread only understands HantekDsoControl's internals (its raw sample layout and
-    // control[]/pending-command bookkeeping are 6022-specific, see hantekdso/capturing.cpp) -
-    // Dso5200DsoControl instead runs its own capture polling loop internally, started from its
-    // constructor, so there is nothing extra to start here for that model.
-    std::unique_ptr< CapturingThread > capturingThread;
-    if ( HantekDsoControl *legacyControl = dsoControl.asHantekDsoControl() ) {
-        capturingThread = std::unique_ptr< CapturingThread >( new CapturingThread( legacyControl ) );
-        capturingThread->start();
-    }
+    // La captura corre en el hilo propio del núcleo (dso5200basic), que arranca Dso5200DsoControl.
 
     if ( verboseLevel )
         qDebug() << startupTime.elapsed() << "ms:"
@@ -578,18 +561,15 @@ int main( int argc, char *argv[] ) {
     // the stepwise text output gives some hints about the shutdown timing
     // not needed with appropriate verbose level
     if ( verboseLevel < 2 )
-        std::cerr << "OpenHantek6022 "; // 1st part
+        std::cerr << "OpenHantek "; // 1st part
 
     dsoControl.quitSampling(); // send USB control command, stop bulk transfer
 
-    // stop the capturing thread
-    // wait 2 * record time (delay is ms) for dso to finish
-    unsigned waitForDso = unsigned( 2000 * dsoControl.getSamplesize() / dsoControl.getSamplerate() );
-    waitForDso = qMax( waitForDso, 10000U ); // wait for at least 10 s
-    if ( capturingThread ) {
-        capturingThread->requestInterruption();
-        capturingThread->wait( waitForDso );
-    }
+    // wait 2 * record time (delay is ms) for dso to finish, at least 10 s
+    const double samplerateNow = dsoControl.getSamplerate();
+    unsigned waitForDso = 10000U;
+    if ( samplerateNow > 0.0 )
+        waitForDso = qMax( unsigned( 2000.0 * dsoControl.getSamplesize() / samplerateNow ), waitForDso );
     if ( verboseLevel < 2 )
         std::cerr << "has "; // 2nd part
 
@@ -616,7 +596,7 @@ int main( int argc, char *argv[] ) {
         libusb_exit( context );
 
     if ( verboseLevel >= 2 )
-        std::cerr << "OpenHantek6022 has stopped after "; // part 1..4
+        std::cerr << "OpenHantek has stopped after "; // part 1..4
 
     std::cerr << openHantekMainWindow.elapsedTime.elapsed() / 1000 << " s\n"; // last part
 

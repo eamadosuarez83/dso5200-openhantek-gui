@@ -17,7 +17,7 @@
 
 Dso5200DsoControl::Dso5200DsoControl( ScopeDevice *scopeDevice, const DSOModel *model, int verboseLevel )
     : device( scopeDevice ), model( model ), verboseLevel( verboseLevel ) {
-    result.data.resize( kChannels + 1 ); // CH1, CH2 y el hueco del canal MATH (no existe en este aparato)
+    result.data.resize( kChannels + 1 ); // CH1, CH2 y MATH (lo calcula MathChannel)
     openCore();
 }
 
@@ -28,14 +28,17 @@ bool Dso5200DsoControl::openCore() {
     if ( !device || !model )
         return false;
 
-    // El núcleo abre su propia conexión al mismo dispositivo USB; la de la GUI se cierra antes porque
-    // el interfaz solo puede reclamarlo una conexión. expected=true: no es una desconexión real, el
-    // supervisor de reconexión la ignora.
-    libusb_device *usbDevice = device->getUSBDevice();
-    device->disconnectFromDevice( true );
-
-    core.reset( new Dso5200Core( usbDevice, (long)model->vendorID, (long)model->productID, model->name.toStdString(),
-                                 verboseLevel > 2 ) );
+    if ( device->isDemoDevice() ) {
+        core.reset( new Dso5200Core() ); // simulador de dso5200basic
+    } else {
+        // El núcleo abre su propia conexión al mismo dispositivo USB; la de la GUI se cierra antes
+        // porque el interfaz solo puede reclamarlo una conexión. expected=true: no es una desconexión
+        // real, el supervisor de reconexión la ignora.
+        libusb_device *usbDevice = device->getUSBDevice();
+        device->disconnectFromDevice( true );
+        core.reset( new Dso5200Core( usbDevice, (long)model->vendorID, (long)model->productID,
+                                     model->name.toStdString(), verboseLevel > 2 ) );
+    }
     core->onFrame = [ this ]( const Dso5200Core::Frame &frame ) { onCoreFrame( frame ); };
     core->onDisconnected = [ this ]() { emit communicationError(); };
 
@@ -114,8 +117,12 @@ void Dso5200DsoControl::onCoreFrame( const Dso5200Core::Frame &frame ) {
     int source;
     double softLevel;
     bool rising;
+    MathChannel *math;
+    const DsoSettingsScope *scope;
     {
         std::lock_guard< std::mutex > lock( settingsMutex );
+        math = mathChannel.get();
+        scope = scopeSettings;
         for ( unsigned ch = 0; ch < kChannels; ++ch )
             settings[ ch ] = channel[ ch ];
         source = triggerSource;
@@ -134,21 +141,13 @@ void Dso5200DsoControl::onCoreFrame( const Dso5200Core::Frame &frame ) {
         result.freeRunning = false;
         result.tag = frame.frameNumber;
         size_t samplesPerChannel = 0;
-        // Muestras de CH2 para el disparo por software. Se toman aunque CH2 esté oculto en la GUI:
-        // el aparato lo sigue capturando (ver setChannelUsed()). Antes se buscaba el flanco en
-        // result.data[1], que queda vacío con CH2 oculto, y el disparo se perdía sin avisar.
-        std::vector< double > ch2Trigger;
+        // Se cargan los dos canales aunque uno esté oculto en la GUI (el aparato los captura igual,
+        // ver setChannelUsed()): el disparo por software de CH2 y el canal MATH los necesitan. Los
+        // ocultos se vacían al final, antes de entregar la captura.
         for ( const Dso5200Core::Channel &in : frame.channels ) {
             if ( in.id >= kChannels )
                 continue;
             const double factor = ( settings[ in.id ].inverted ? -1.0 : 1.0 ) * settings[ in.id ].probeAttn;
-            if ( source == 1 && in.id == 1 ) {
-                ch2Trigger.resize( in.samples.size() );
-                for ( size_t i = 0; i < in.samples.size(); ++i )
-                    ch2Trigger[ i ] = in.samples[ i ] * factor;
-            }
-            if ( !settings[ in.id ].used )
-                continue; // canal oculto en la GUI: no se entregan sus muestras
             std::vector< double > &out = result.data[ in.id ];
             out.resize( in.samples.size() );
             for ( size_t i = 0; i < in.samples.size(); ++i )
@@ -165,9 +164,9 @@ void Dso5200DsoControl::onCoreFrame( const Dso5200Core::Frame &frame ) {
             // Disparo por software en CH2. Las muestras ya están en voltios en la punta (sonda e
             // inversión aplicadas), igual que el nivel de la GUI. Histéresis 0.1 div contra el ruido.
             // Sin flanco (o sin muestras de CH2) liveTrigger = false: la GUI marca "TR" en rojo.
-            const int pos = ch2Trigger.empty()
+            const int pos = result.data[ 1 ].empty()
                                 ? -1
-                                : findSoftwareTrigger( ch2Trigger, softLevel, 0.1 * settings[ 1 ].gain, rising );
+                                : findSoftwareTrigger( result.data[ 1 ], softLevel, 0.1 * settings[ 1 ].gain, rising );
             result.liveTrigger = pos >= 0;
             if ( pos >= 0 )
                 result.triggeredPosition = std::max( pos, 1 ); // 0 significa "sin disparo" para la GUI
@@ -192,6 +191,18 @@ void Dso5200DsoControl::onCoreFrame( const Dso5200Core::Frame &frame ) {
                 fprintf( stderr, "[gui] disparo fuente=CH%d pos=%d live=%d antes=%.3f despues=%.3f\n", source + 1, tp,
                          (int)result.liveTrigger, v[ tp - 20 ], v[ tp + 20 ] );
         }
+    }
+    // Canal MATH (CH1 ± CH2, etc.), con los dos canales todavía cargados. calculate() toma su propio
+    // bloqueo de escritura sobre result.
+    if ( math && scope && scope->voltage.size() > kChannels && scope->voltage[ kChannels ].used )
+        math->calculate( result );
+    {
+        QWriteLocker locker( &result.lock );
+        for ( unsigned ch = 0; ch < kChannels; ++ch )
+            if ( !settings[ ch ].used ) {
+                result.data[ ch ].clear(); // canal oculto en la GUI: no se entregan sus muestras
+                result.clipped &= (unsigned char)~( 1u << ch );
+            }
     }
     samplerate = frame.samplerate;
     if ( samplerateChanged )
@@ -222,13 +233,6 @@ int Dso5200DsoControl::findSoftwareTrigger( const std::vector< double > &samples
         }
     }
     return best;
-}
-
-Dso::ErrorCode Dso5200DsoControl::stringCommand( const QString & ) {
-    // Sin consola de comandos crudos: se usa para mostrar el estado del núcleo (útil para depurar).
-    if ( coreReady() )
-        emit statusMessage( QString::fromStdString( core->statusText() ), 10000 );
-    return Dso::ErrorCode::NONE;
 }
 
 void Dso5200DsoControl::quitSampling() {
@@ -350,8 +354,6 @@ Dso::ErrorCode Dso5200DsoControl::setTriggerSource( int ch ) {
     return Dso::ErrorCode::NONE;
 }
 
-Dso::ErrorCode Dso5200DsoControl::setTriggerSmooth( int ) { return Dso::ErrorCode::UNSUPPORTED; }
-
 Dso::ErrorCode Dso5200DsoControl::setTriggerLevel( ChannelID ch, double level ) {
     if ( ch >= kChannels )
         return Dso::ErrorCode::PARAMETER;
@@ -386,15 +388,18 @@ Dso::ErrorCode Dso5200DsoControl::setTriggerPosition( double ) {
     return Dso::ErrorCode::NONE;
 }
 
-Dso::ErrorCode Dso5200DsoControl::setCalFreq( double ) { return Dso::ErrorCode::UNSUPPORTED; }
-
-void Dso5200DsoControl::calibrateOffset( bool ) {
-    emit statusMessage( tr( "DSO-5200: sin calibración EEPROM/en vivo; el cero lo calcula el núcleo." ), 5000 );
-}
-
 void Dso5200DsoControl::applySettings( const DsoSettingsScope *scope ) {
     if ( !scope )
         return;
+    {
+        // Se crea una sola vez (la GUI siempre pasa el mismo objeto de ajustes); onCoreFrame() toma el
+        // puntero bajo settingsMutex.
+        std::lock_guard< std::mutex > lock( settingsMutex );
+        if ( !mathChannel ) {
+            scopeSettings = scope;
+            mathChannel.reset( new MathChannel( scope ) );
+        }
+    }
     {
         std::lock_guard< std::mutex > lock( settingsMutex );
         for ( ChannelID ch = 0; ch < kChannels && ch < scope->voltage.size(); ++ch ) {

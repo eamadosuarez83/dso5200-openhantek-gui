@@ -107,13 +107,6 @@ message( "-- COMPILE_DEFINITIONS: ${CompDefs}" )
 # Qt Widgets based Gui with OpenGL canvas
 add_subdirectory(openhantek)
 
-if (WIN32)
-    install(
-        FILES CHANGELOG LICENSE README
-        DESTINATION "."
-    )
-endif()
-
 # Add auxiliary files to the project, so that these files appear in VisualStudio/QtCreator
 file(GLOB_RECURSE MDFILES "docs/*.md" "openhantek/*.md")
 add_custom_target(

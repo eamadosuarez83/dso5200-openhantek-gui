@@ -23,7 +23,13 @@ recompilar.
   `IDsoControl` (`src/dso5200/idsocontrol.h`). Sin lógica de protocolo: traduce unidades de la
   sonda, convierte cada frame en `DSOsamples` y reenvía la frecuencia de muestreo real.
 - **`src/dso5200/modelDSO5200.{h,cpp}`**: modelo (VID/PID, V/div 20 mV..10 V, DC/AC/GND).
-- El stack del 6022 (`hantekdso/`, `hantekprotocol/`, modelos, modo demo) sigue intacto por ahora.
+- **El 6022 se quitó** (25-nov-2026, "Paso 3"; respaldo en la etiqueta `respaldo-antes-quitar-6022`):
+  `HantekDsoControl`, hilo de captura, disparo por software y protocolo USB del 6022, sus modelos y
+  firmwares, la compilación para Windows (dependía de sus drivers) y los documentos y la web del
+  upstream. También los controles que no hacían nada con el 5200: frecuencia de la salida de
+  calibración, suavizado del disparo, modos NORMAL/SINGLE, MATH como fuente de disparo, calibrar
+  offset, comando manual y la casilla de "modificación AC". Del 6022 quedan las piezas comunes de la
+  GUI (`hantekdso/`: modelo, especificación, muestras, canal MATH).
 
 ## Qué funciona (verificado con el DSO-5200A y la CAL, 0..2 V a 1 kHz)
 
@@ -49,12 +55,16 @@ recompilar.
   ±500 muestras del centro y la pantalla se llena). Con pocos períodos (200 µs/div: unos 2) el
   flanco elegido puede quedar lejos del centro y la traza "salta" con un hueco variable a un lado.
 
+- **Canal MATH** (25-nov-2026): lo calcula el adaptador con `MathChannel` de la GUI (antes el hueco
+  quedaba vacío). Funciona aunque CH1 o CH2 estén ocultos.
+- **Modo demo** (25-nov-2026): `--demoMode` o el botón del diálogo inicial usan el simulador de
+  dso5200basic (`src/device/simulator.cpp`, compilado sin cambios en `dso5200core`).
+
 ## Pendiente
 
-- Lo que el núcleo aún no ofrece se rechaza con un aviso en la barra de estado: disparo por CH2,
-  modos NORMAL/SINGLE, mover el pre-disparo por hardware (fijo al 50 %).
+- El núcleo solo ofrece el modo AUTO y el pre-disparo por hardware fijo al 50 % (la GUI desplaza la
+  vista dentro del registro).
 - Probar desconectar el USB con la GUI abierta (reconexión).
-- Paso 3: quitar el stack del 6022.
 
 ## Depuración
 
@@ -71,7 +81,7 @@ mkdir -p build && cd build
 cmake .. -DCMAKE_BUILD_TYPE=Release     # -DDSO5200BASIC_DIR=... si no está como carpeta hermana
 make -j$(nproc)
 ./openhantek/OpenHantek                # con el osciloscopio real conectado
-./openhantek/OpenHantek --demoMode     # sin hardware, señales sintéticas (familia 6022 solamente)
+./openhantek/OpenHantek --demoMode     # sin hardware: simulador de dso5200basic
 ```
 
 Requiere las reglas udev para acceso sin root (`utils/udev_rules/`, o las que ya tenía instaladas

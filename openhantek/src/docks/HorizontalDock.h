@@ -55,9 +55,6 @@ class HorizontalDock : public QDockWidget {
     /// \param steps The steps value the spin box should accept.
     void setSamplerateSteps( int mode, QList< double > sampleSteps );
     void calculateSamplerateSteps( double timebase );
-    /// \brief Changes the calibration frequency.
-    /// \param calfreq The calibration frequency in hertz.
-    double setCalfreq( double calfreq );
 
   public slots:
     /// \brief Loads settings into GUI
@@ -72,16 +69,13 @@ class HorizontalDock : public QDockWidget {
     QLabel *samplerateLabel;        ///< The label for the samplerate spinbox
     QLabel *timebaseLabel;          ///< The label for the timebase spinbox
     QLabel *formatLabel;            ///< The label for the format combobox
-    QLabel *calfreqLabel;           ///< The label for the calibration frequency spinbox
     SiSpinBox *samplerateSiSpinBox; ///< Selects the samplerate for acquisitions
     SiSpinBox *timebaseSiSpinBox;   ///< Selects the timebase for voltage graphs
     QComboBox *formatComboBox;      ///< Selects the way the sampled data is
                                     ///  interpreted and shown
-    QComboBox *calfreqComboBox;     ///< Selects the calibration frequency
 
     DsoSettingsScope *scope;         ///< The settings provided by the parent class
     QList< double > timebaseSteps;   ///< Steps for the timebase spinbox
-    QList< double > calfreqSteps;    ///< Steps for the calfreq spinbox
     QList< double > samplerateSteps; ///< Possible sampe rates
 
     QStringList formatStrings; ///< Strings for the formats
@@ -90,7 +84,6 @@ class HorizontalDock : public QDockWidget {
     void samplerateSelected( double samplerate );
     void timebaseSelected( double timebase );
     void formatSelected( int index );
-    void calfreqIndexSelected( int index );
 
   private:
     double samplerateRequest = 0;
@@ -100,5 +93,4 @@ class HorizontalDock : public QDockWidget {
     void timebaseChanged( double timebase );       ///< The timebase has been changed
     void recordLengthChanged( int recordLength );  ///< The recordd length has been changed
     void formatChanged( Dso::GraphFormat format ); ///< The viewing format has been changed
-    void calfreqChanged( double calfreq );         ///< The timebase has been changed
 };

@@ -3,13 +3,11 @@
 #pragma once
 
 #include "enums.h"
-#include "hantekprotocol/definitions.h"
 #include "hantekprotocol/types.h"
 #include <QList>
 
 namespace Dso {
 
-using namespace Hantek;
 
 /// \brief Stores the samplerate limits for calculations.
 struct ControlSamplerateLimits {
@@ -32,11 +30,6 @@ struct ControlSpecificationGainLevel {
     // double gainError;
 };
 
-struct FixedSampleRate {
-    double samplerate;
-    unsigned char id;
-    unsigned oversampling;
-};
 
 /// \brief Stores the specifications of the currently connected device.
 struct ControlSpecification {
@@ -46,26 +39,15 @@ struct ControlSpecification {
     // Limits
     ControlSpecificationSamplerate samplerate; ///< The samplerate specifications
 
-    /// For devices that support only fixed sample rates
-    std::vector< FixedSampleRate > fixedSampleRates;
 
-    // Calibration
-    /// DSO6022 has calibration in small EEPROM, DDS120 has big fw EEPROM
-    bool hasCalibrationEEPROM = true;
-    bool isDemoDevice = false;
-    /// The sample values for one div
-    typedef std::vector< double > VoltageScale;
-    std::vector< VoltageScale > voltageScale; // Per channel
 
     /// Gain levels
     std::vector< ControlSpecificationGainLevel > gain;
 
     // Features
     std::vector< Coupling > couplings = { Dso::Coupling::DC, Dso::Coupling::AC };
-    std::vector< TriggerMode > triggerModes = { TriggerMode::ROLL, TriggerMode::AUTO, TriggerMode::NORMAL, TriggerMode::SINGLE };
-    int fixedUSBinLength = 0;
+    std::vector< TriggerMode > triggerModes = { TriggerMode::AUTO };
     bool hasACcoupling = false;
 
-    QList< double > calfreqSteps;
 };
 } // namespace Dso

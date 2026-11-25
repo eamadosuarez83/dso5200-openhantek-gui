@@ -1,4 +1,4 @@
-OpenHantek is an oscilloscope software for Hantek DSO-6022 USB devices.
-The source code and detailed developer documentation is available at:
-https://github.com/OpenHantek/OpenHantek6022 (oscilloscope software)
-https://github.com/Ho-Ro/Hantek6022API (hardware, firmware and tools)
+dso5200-openhantek: software de osciloscopio para el Hantek DSO-5200/5200A en Linux,
+basado en OpenHantek6022 (https://github.com/OpenHantek/OpenHantek6022) y en el núcleo
+dso5200basic (https://github.com/eamadosuarez83/dso5200-cli).
+Código fuente: https://github.com/eamadosuarez83/dso5200-openhantek-gui

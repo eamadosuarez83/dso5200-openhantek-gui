@@ -6,7 +6,7 @@
 #include <QString>
 
 /**
- * Represents an entry in the {@link DevicesListModel}.
+ * Estado de un aparato encontrado en la ventana de arranque (SelectSupportedDevice).
  */
 struct DeviceListEntry {
     UniqueUSBid id;
@@ -14,8 +14,4 @@ struct DeviceListEntry {
     bool canConnect = false;
     bool needFirmware = false;
     QString errorMessage;
-    QString getStatus() const {
-        return errorMessage.size() ? errorMessage
-                                   : ( canConnect ? "Ready" : ( needFirmware ? "Firmware upload" : "Cannot connect" ) );
-    }
 };

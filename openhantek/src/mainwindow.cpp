@@ -12,11 +12,11 @@
 #include "configdialog.h"
 #include "dockwindows.h"
 #include "documents.h"
+#include "dso5200/idsocontrol.h"
 #include "dsomodel.h"
 #include "dsowidget.h"
 #include "exporting/exporterinterface.h"
 #include "exporting/exporterregistry.h"
-#include "hantekdsocontrol.h"
 #include "usb/scopedevice.h"
 #include "viewconstants.h"
 
@@ -114,17 +114,8 @@ MainWindow::MainWindow( IDsoControl *dsoControl, DsoSettings *settings, Exporter
     ui->actionExit->setToolTip( tr( "Exit the application" ) );
     ui->actionSettings->setIcon( QIcon( iconPath + "settings.svg" ) );
     ui->actionSettings->setToolTip( tr( "Define scope settings, analysis parameters and colors" ) );
-    ui->actionCalibrateOffset->setIcon( QIcon( iconPath + "offset.svg" ) );
-    ui->actionCalibrateOffset->setToolTip( tr( "Short-circuit both inputs and slowly select all voltage gain settings" ) );
-    ui->actionManualCommand->setIcon( QIcon( iconPath + "terminal.svg" ) );
-    ui->actionManualCommand->setToolTip( tr( "Send low level commands directly to the scope: 'CC XX XX'" ) );
     ui->actionUserManual->setIcon( QIcon( iconPath + "book.svg" ) );
     ui->actionUserManual->setToolTip( tr( "Read the fine manual" ) );
-    ui->actionACmodification->setIcon( QIcon( iconPath + "book.svg" ) );
-    ui->actionACmodification->setToolTip( tr( "Documentation how to add HW for AC coupled inputs" ) );
-    ui->actionFrequencyGeneratorModification->setIcon( QIcon( iconPath + "book.svg" ) );
-    ui->actionFrequencyGeneratorModification->setToolTip(
-        tr( "Documentation how to get jitter-free calibration frequency output" ) );
     ui->actionAbout->setIcon( QIcon( iconPath + "about.svg" ) );
     ui->actionAbout->setToolTip( tr( "Show info about the scope's HW and SW" ) );
     ui->actionAboutQt->setIcon( QIcon( iconPath + "qt.svg" ) );
@@ -133,10 +124,10 @@ MainWindow::MainWindow( IDsoControl *dsoControl, DsoSettings *settings, Exporter
     // Window title
     setWindowIcon( QIcon( ":/images/OpenHantek.svg" ) );
     setWindowTitle( dsoControl->getDevice()->isRealHW()
-                        ? tr( "OpenHantek6022 (%1) - Device %2 (FW%3)" )
+                        ? tr( "OpenHantek DSO-5200 (%1) - Device %2 (FW%3)" )
                               .arg( QString::fromStdString( VERSION ), dsoControl->getModel()->name )
                               .arg( dsoControl->getDevice()->getFwVersion(), 4, 16, QChar( '0' ) )
-                        : tr( "OpenHantek6022 (%1) - " ).arg( QString::fromStdString( VERSION ) ) + tr( "Demo Mode" ) );
+                        : tr( "OpenHantek DSO-5200 (%1) - " ).arg( QString::fromStdString( VERSION ) ) + tr( "Demo Mode" ) );
 
 #if ( QT_VERSION >= QT_VERSION_CHECK( 5, 6, 0 ) )
     setDockOptions( dockOptions() | QMainWindow::GroupedDragging );
@@ -238,62 +229,10 @@ MainWindow::MainWindow( IDsoControl *dsoControl, DsoSettings *settings, Exporter
     setCentralWidget( dsoWidget );
 
     deviceCommandWidgets = { voltageDock, horizontalDock, triggerDock, spectrumDock, dsoWidget };
-    deviceCommandActions = { ui->actionOpen, ui->actionSampling, ui->actionRefresh, ui->actionCalibrateOffset,
-                             ui->actionManualCommand };
-
-    if ( dsoControl->getDevice()->isRealHW() ) { // enable online calibration and manual command input
-        // Command field inside the status bar
-        commandEdit = new QLineEdit( this );
-        // allowed commands are either control command "cc E0..E6 xx [xx ...]" or frequency command "freq nn"
-        QRegularExpressionValidator *v =
-            new QRegularExpressionValidator( QRegularExpression( "(cc|CC) [eE][0-6]( [0-9a-fA-F]{1,2})+|freq \\d{1,6}" ), this );
-        commandEdit->setValidator( v );
-        commandEdit->hide();
-        statusBar()->addPermanentWidget( commandEdit, 1 );
-
-        connect( ui->actionCalibrateOffset, &QAction::toggled, this, [ this, dsoControl, scope ]( bool active ) {
-            if ( active )
-                active = ( QMessageBox::Apply ==
-                           QMessageBox::information( this, tr( "Calibrate Offset" ),
-                                                     tr( "Short-circuit both inputs and slowly select all voltage gain settings" ),
-                                                     QMessageBox::Apply | QMessageBox::Abort, QMessageBox::Abort ) );
-            if ( verboseLevel > 2 )
-                qDebug() << "  Calibrate offset" << active;
-            ui->actionCalibrateOffset->setChecked( active );
-            dsoControl->calibrateOffset( active );
-            scope->liveCalibrationActive = active;
-        } );
-
-        // disable calibration e.g. if zero signal too noisy or offset too big
-        connect( dsoControl, &IDsoControl::liveCalibrationError, this, [ this, scope ]() {
-            if ( verboseLevel > 2 )
-                qDebug() << "  Live calibration error";
-            scope->liveCalibrationActive = false;           // set incactive first to avoid ..
-            ui->actionCalibrateOffset->setChecked( false ); // .. calibration storage actions
-        } );
-
-        connect( ui->actionManualCommand, &QAction::toggled, this, [ this ]( bool checked ) {
-            commandEdit->setVisible( checked );
-            if ( checked )
-                commandEdit->setFocus();
-        } );
-
-        connect( commandEdit, &QLineEdit::returnPressed, this, [ this, dsoControl ]() {
-            Dso::ErrorCode errorCode = dsoControl->stringCommand( commandEdit->text() );
-            commandEdit->clear();
-            ui->actionManualCommand->setChecked( false );
-            if ( errorCode != Dso::ErrorCode::NONE )
-                statusBar()->showMessage( tr( "Invalid command" ), 3000 );
-        } );
-
-    } else { // do not show these actions
-        ui->actionCalibrateOffset->setVisible( false );
-        ui->actionManualCommand->setVisible( false );
-    }
+    deviceCommandActions = { ui->actionOpen, ui->actionSampling, ui->actionRefresh };
 
     // Connect signals that display text in statusbar
     connect( dsoControl, &IDsoControl::statusMessage, this, [ this ]( QString text, int timeout ) {
-        ui->actionManualCommand->setChecked( false );
         statusBar()->showMessage( text, timeout );
     } );
 
@@ -302,7 +241,6 @@ MainWindow::MainWindow( IDsoControl *dsoControl, DsoSettings *settings, Exporter
              [ dsoControl, this ]() { dsoControl->setSamplerate( dsoSettings->scope.horizontal.samplerate ); } );
     connect( horizontalDock, &HorizontalDock::samplerateChanged, dsoWidget,
              [ this ]() { dsoWidget->updateSamplerate( dsoSettings->scope.horizontal.samplerate ); } );
-    connect( horizontalDock, &HorizontalDock::timebaseChanged, triggerDock, &TriggerDock::timebaseChanged );
     connect( horizontalDock, &HorizontalDock::timebaseChanged, dsoControl,
              [ dsoControl, this ]() { dsoControl->setRecordTime( dsoSettings->scope.horizontal.timebase * DIVS_TIME ); } );
     connect( horizontalDock, &HorizontalDock::timebaseChanged, dsoWidget,
@@ -318,8 +256,6 @@ MainWindow::MainWindow( IDsoControl *dsoControl, DsoSettings *settings, Exporter
                  dsoWidget->updateSamplerate( samplerate );
                  dsoWidget->updateOversample( oversample );
              } );
-    connect( horizontalDock, &HorizontalDock::calfreqChanged, dsoControl,
-             [ dsoControl, this ]() { dsoControl->setCalFreq( dsoSettings->scope.horizontal.calfreq ); } );
     connect( horizontalDock, &HorizontalDock::formatChanged, spectrumDock, [ = ]( Dso::GraphFormat format ) {
         ui->actionHistogram->setEnabled( format == Dso::GraphFormat::TY );
         spectrumDock->enableSpectrumDock( format == Dso::GraphFormat::TY );
@@ -336,8 +272,6 @@ MainWindow::MainWindow( IDsoControl *dsoControl, DsoSettings *settings, Exporter
     } );
     connect( triggerDock, &TriggerDock::sourceChanged, dsoControl, &IDsoControl::setTriggerSource );
     connect( triggerDock, &TriggerDock::sourceChanged, dsoWidget, &DsoWidget::updateTriggerSource );
-    connect( triggerDock, &TriggerDock::smoothChanged, dsoControl, &IDsoControl::setTriggerSmooth );
-    // should we send the smooth mode also to dsoWidget?
     connect( triggerDock, &TriggerDock::slopeChanged, dsoControl, &IDsoControl::setTriggerSlope );
     connect( triggerDock, &TriggerDock::slopeChanged, dsoWidget, &DsoWidget::updateTriggerSlope );
     connect( dsoWidget, &DsoWidget::triggerPositionChanged, dsoControl, &IDsoControl::setTriggerPosition );
@@ -515,13 +449,8 @@ MainWindow::MainWindow( IDsoControl *dsoControl, DsoSettings *settings, Exporter
 
     connect( ui->actionUserManual, &QAction::triggered, this, [ this ]() { openDocument( UserManualName ); } );
 
-    connect( ui->actionACmodification, &QAction::triggered, this, [ this ]() { openDocument( ACModificationName ); } );
-
-    connect( ui->actionFrequencyGeneratorModification, &QAction::triggered, this,
-             [ this ]() { openDocument( FrequencyGeneratorModificationName ); } );
-
-    connect( ui->actionAbout, &QAction::triggered, this, [ this ]() {
-        QString deviceSpec = dsoSettings->deviceName == "DEMO"
+    connect( ui->actionAbout, &QAction::triggered, this, [ this, dsoControl ]() {
+        QString deviceSpec = dsoControl->getDevice()->isDemoDevice()
                                  ? tr( "<p>Demo Mode</p>" )
                                  : tr( "<p>Device: %1 (%2), FW%3</p>" )
                                        .arg( dsoSettings->deviceName, dsoSettings->deviceID ) // device type, ser. num
@@ -529,13 +458,11 @@ MainWindow::MainWindow( IDsoControl *dsoControl, DsoSettings *settings, Exporter
                                              QChar( '0' ) ); // FW version
         QMessageBox::about(
             this, QString( "%1 (%2)" ).arg( QCoreApplication::applicationName(), VERSION ),
-            QString( tr( "<p>Open source software for Hantek6022 USB oscilloscopes</p>"
-                         "<p>Maintainer: Martin Homuth-Rosemann</p>"
+            QString( tr( "<p>Open source software for the Hantek DSO-5200/5200A USB oscilloscope</p>"
+                         "<p>Based on OpenHantek6022 (maintainer: Martin Homuth-Rosemann)</p>"
                          "<p>Copyright &copy; 2010, 2011 Oliver Haag</p>"
                          "<p>Copyright &copy; 2012-%1 OpenHantek community<br/>"
-                         "<a href='https://github.com/OpenHantek'>https://github.com/OpenHantek</a></p>"
-                         "<p>Open source firmware copyright &copy; 2019-%1 Martin Homuth-Rosemann<br/>"
-                         "<a href='https://github.com/Ho-Ro/Hantek6022API'>https://github.com/Ho-Ro/Hantek6022API</a></p>" ) )
+                         "<a href='https://github.com/OpenHantek'>https://github.com/OpenHantek</a></p>" ) )
                     .arg( QDate::currentDate().year() ) // latest year for (c)
 
                 + deviceSpec // "DEVICE (SERIALNUMBER) FW_VERSION" or "Demo Mode"
@@ -597,16 +524,10 @@ void MainWindow::deviceConnectionStateChanged( DeviceConnectionState state, cons
 
     if ( !available ) {
         QSignalBlocker samplingBlocker( ui->actionSampling );
-        QSignalBlocker calibrationBlocker( ui->actionCalibrateOffset );
-        QSignalBlocker manualCommandBlocker( ui->actionManualCommand );
         ui->actionSampling->setChecked( false );
         ui->actionSampling->setIcon( iconPlay );
         ui->actionSampling->setText( tr( "Start" ) );
         ui->actionSampling->setStatusTip( tr( "Oscilloscope unavailable" ) );
-        ui->actionCalibrateOffset->setChecked( false );
-        ui->actionManualCommand->setChecked( false );
-        if ( commandEdit )
-            commandEdit->hide();
     }
 
     if ( !message.isEmpty() )
@@ -624,9 +545,6 @@ void MainWindow::setDeviceCommandUiEnabled( bool enabled ) {
         if ( action )
             action->setEnabled( enabled );
     }
-
-    if ( commandEdit )
-        commandEdit->setEnabled( enabled );
 }
 
 

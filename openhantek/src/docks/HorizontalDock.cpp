@@ -27,7 +27,7 @@ template < typename... Args > struct SELECT {
     }
 };
 
-HorizontalDock::HorizontalDock( DsoSettingsScope *scope, const Dso::ControlSpecification *spec, QWidget *parent )
+HorizontalDock::HorizontalDock( DsoSettingsScope *scope, const Dso::ControlSpecification * /*spec*/, QWidget *parent )
     : QDockWidget( tr( "Horizontal" ), parent ), scope( scope ) {
 
     if ( scope->verboseLevel > 1 )
@@ -59,15 +59,6 @@ HorizontalDock::HorizontalDock( DsoSettingsScope *scope, const Dso::ControlSpeci
     for ( Dso::GraphFormat format : Dso::GraphFormatEnum )
         formatComboBox->addItem( Dso::graphFormatString( format ) );
 
-    calfreqLabel = new QLabel( tr( "Calibration out" ) );
-    calfreqSteps = spec->calfreqSteps;
-    std::reverse( calfreqSteps.begin(), calfreqSteps.end() ); // put highest value on top of the list
-    calfreqComboBox = new QComboBox();
-    if ( scope->toolTipVisible )
-        calfreqComboBox->setToolTip( tr( "Select the frequency of the calibration output, scroll for fast change" ) );
-    for ( double calfreqStep : std::as_const( calfreqSteps ) )
-        calfreqComboBox->addItem( valueToString( calfreqStep, UNIT_HERTZ, calfreqStep < 10e3 ? 2 : 0 ) );
-
     dockLayout = new QGridLayout();
     dockLayout->setColumnMinimumWidth( 0, 64 );
     dockLayout->setColumnStretch( 1, 1 );
@@ -80,8 +71,6 @@ HorizontalDock::HorizontalDock( DsoSettingsScope *scope, const Dso::ControlSpeci
     dockLayout->addWidget( samplerateSiSpinBox, row++, 1 );
     dockLayout->addWidget( formatLabel, row, 0 );
     dockLayout->addWidget( formatComboBox, row++, 1 );
-    dockLayout->addWidget( calfreqLabel, row, 0 );
-    dockLayout->addWidget( calfreqComboBox, row++, 1 );
 
     dockWidget = new QWidget();
     SetupDockWidget( this, dockWidget, dockLayout );
@@ -96,8 +85,6 @@ HorizontalDock::HorizontalDock( DsoSettingsScope *scope, const Dso::ControlSpeci
              [ this ]( double timebase ) { this->timebaseSelected( timebase ); } );
     connect( formatComboBox, SELECT< int >::OVERLOAD_OF( &QComboBox::currentIndexChanged ), this,
              [ this ]( int index ) { this->formatSelected( index ); } );
-    connect( calfreqComboBox, SELECT< int >::OVERLOAD_OF( &QComboBox::currentIndexChanged ), this,
-             [ this ]( int index ) { this->calfreqIndexSelected( index ); } );
 }
 
 
@@ -106,7 +93,6 @@ void HorizontalDock::loadSettings( DsoSettingsScope *scope ) {
     setSamplerate( scope->horizontal.samplerate );
     setTimebase( scope->horizontal.timebase );
     setFormat( scope->horizontal.format );
-    setCalfreq( scope->horizontal.calfreq );
 }
 
 
@@ -167,19 +153,6 @@ int HorizontalDock::setFormat( Dso::GraphFormat format ) {
         return format;
     }
     return -1;
-}
-
-
-double HorizontalDock::setCalfreq( double calfreq ) {
-    if ( scope->verboseLevel > 2 )
-        qDebug() << "  HDock::setCalfreq()" << calfreq;
-    auto indexIt = std::find( calfreqSteps.begin(), calfreqSteps.end(), calfreq );
-    if ( indexIt == calfreqSteps.end() )
-        return -1;
-    int index = int( std::distance( calfreqSteps.begin(), indexIt ) );
-    QSignalBlocker blocker( calfreqComboBox );
-    calfreqComboBox->setCurrentIndex( index );
-    return calfreq;
 }
 
 
@@ -281,12 +254,3 @@ void HorizontalDock::formatSelected( int index ) {
 }
 
 
-/// \brief Called when the calfreq combobox changes its value.
-/// \param index The item index.
-void HorizontalDock::calfreqIndexSelected( int index ) {
-    double calfreq = calfreqSteps[ index ];
-    if ( scope->verboseLevel > 2 )
-        qDebug() << "  HDock::calfreqIndex Selected()" << index << calfreq;
-    scope->horizontal.calfreq = calfreq;
-    emit calfreqChanged( calfreq );
-}

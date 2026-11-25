@@ -53,15 +53,6 @@ class ScopeDevice : public QObject {
     bool isRealHW() const { return realHW; }
     bool isDemoDevice() const { return !realHW; }
 
-    /// \brief Stop a long running (interruptible) bulk transfer
-    void stopSampling() { stopTransfer = true; }
-
-    bool hasStopped() {
-        bool stopped = stopTransfer;
-        stopTransfer = false;
-        return stopped;
-    }
-
     /**
      * @return Return true if this device needs a firmware first
      */
@@ -94,46 +85,6 @@ class ScopeDevice : public QObject {
     inline void setFindIteration( unsigned iteration ) { findIteration = iteration; }
     inline unsigned getFindIteration() const { return findIteration; }
 
-    /// \brief Multi packet bulk read from the oscilloscope.
-    /// \param data Buffer for the sent/received data.
-    /// \param length The length of data contained in the packets.
-    /// \param captureSmallBlocks Capture many small blocks instead of one big block (faster gui update)
-    /// \param received The amount of already captured samples
-    /// \param attempts The number of attempts, that are done on timeouts.
-    /// \return Number of received bytes on success, libusb error code on error.
-    int bulkReadMulti( unsigned char *data, unsigned length, bool captureSmallBlocks, unsigned &received,
-                       int attempts = HANTEK_ATTEMPTS_MULTI );
-
-    /// \brief Control transfer to the oscilloscope.
-    /// \param type The request type, also sets the direction of the transfer.
-    /// \param request The request field of the packet.
-    /// \param data Buffer for the sent/received data.
-    /// \param length The length field of the packet.
-    /// \param value The value field of the packet.
-    /// \param index The index field of the packet.
-    /// \param attempts The number of attempts, that are done on timeouts.
-    /// \return Number of transferred bytes on success, libusb error code on error.
-    int controlTransfer( unsigned char type, unsigned char request, unsigned char *data, unsigned int length, int value, int index,
-                         int attempts = HANTEK_ATTEMPTS );
-
-    /// \brief Control write to the oscilloscope.
-    /// \param command Buffer for the sent/received data.
-    /// \return Number of sent bytes on success, libusb error code on error.
-    template < class T > inline int controlWrite( const T *command ) {
-        return controlTransfer( uint8_t( LIBUSB_REQUEST_TYPE_VENDOR ) | uint8_t( LIBUSB_ENDPOINT_OUT ), uint8_t( command->code ),
-                                const_cast< unsigned char * >( command->data() ), unsigned( command->size() ), command->value, 0,
-                                HANTEK_ATTEMPTS );
-    }
-
-    /// \brief Control read to the oscilloscope.
-    /// \param command Buffer for the sent/received data.
-    /// \return Number of received bytes on success, libusb error code on error.
-    template < class T > inline int controlRead( const T *command ) {
-        return controlTransfer( uint8_t( LIBUSB_REQUEST_TYPE_VENDOR ) | uint8_t( LIBUSB_ENDPOINT_IN ), uint8_t( command->code ),
-                                const_cast< unsigned char * >( command->data() ), unsigned( command->size() ), command->value, 0,
-                                HANTEK_ATTEMPTS );
-    }
-
     /**
      * @return Returns the raw libusb device
      */
@@ -151,46 +102,6 @@ class ScopeDevice : public QObject {
     /// \brief Get the oscilloscope model.
     /// \return The ::Model of the connected Hantek DSO.
     inline const DSOModel *getModel() const { return model; }
-    /**
-     * Usually a maximum packet length for in and outgoing packets is determined
-     * by the underlying implementation and usb specification. E.g. the roll buffer
-     * mode uses the maximum in length for transfer. Some devices do not support
-     * that much data though and need an artification restriction.
-     */
-    inline void overwriteInPacketLength( unsigned len ) { inPacketLength = len; }
-
-    /// \brief Bulk transfer to/from the oscilloscope.
-    /// \param endpoint Endpoint number, also sets the direction of the transfer.
-    /// \param data Buffer for the sent/received data.
-    /// \param length The length of the packet.
-    /// \param attempts The number of attempts, that are done on timeouts.
-    /// \param timeout The timeout in ms.
-    /// \return Number of transferred bytes on success, libusb error code on error.
-    /// Public (unlike upstream OpenHantek6022, where every currently supported model speaks
-    /// only CONTROL_* + bulkReadMulti() and this stayed private): the DSO-5200/5200A protocol
-    /// (Dso5200DsoControl) needs genuine bulk OUT command writes and a single bulk IN read for
-    /// the capture-state response, which controlWrite()/controlRead()/bulkReadMulti() don't cover.
-    int bulkTransfer( unsigned char endpoint, const unsigned char *data, unsigned int length, int attempts = HANTEK_ATTEMPTS,
-                      unsigned int timeout = HANTEK_TIMEOUT );
-
-    /// \brief Bulk write to the oscilloscope.
-    /// \param data Buffer for the sent/received data.
-    /// \param length The length of the packet.
-    /// \param attempts The number of attempts, that are done on timeouts.
-    /// \return Number of sent bytes on success, libusb error code on error.
-    inline int bulkWrite( const unsigned char *data, unsigned int length, int attempts = HANTEK_ATTEMPTS ) {
-        return bulkTransfer( HANTEK_EP_OUT, data, length, attempts );
-    }
-
-    /// \brief Bulk read from the oscilloscope.
-    /// \param data Buffer for the sent/received data.
-    /// \param length The length of the packet.
-    /// \param attempts The number of attempts, that are done on timeouts.
-    /// \return Number of received bytes on success, libusb error code on error.
-    template < class T > inline int bulkRead( const T *command, int attempts = HANTEK_ATTEMPTS ) {
-        return bulkTransfer( HANTEK_EP_IN, command->data(), command->size(), attempts );
-    }
-
   protected:
     int claimInterface( const libusb_interface_descriptor *interfaceDescriptor );
 
@@ -209,7 +120,6 @@ class ScopeDevice : public QObject {
 
   private:
     bool realHW = true;
-    bool stopTransfer = false;
     bool disconnected = true;
     bool expectedDisconnect = false;
     QString serialNumber = "0000";

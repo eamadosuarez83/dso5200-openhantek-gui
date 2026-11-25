@@ -35,23 +35,13 @@ static void initSpecifications( Dso::ControlSpecification &specification ) {
     specification.samplerate.multi.max = 250e6;
     specification.samplerate.multi.recordLengths = { 20480 };
 
-    // No fixed-samplerate table: the DSO-5200 uses a continuous divider (CSETTRIGGERORSAMPLERATE)
-    // plus, for the slowest timebases, Dso5200DsoControl's own hardware-validated magic-constant
-    // table - both handled internally, not exposed through ControlSpecification::fixedSampleRates.
-    specification.fixedSampleRates.clear();
+    // Sin tabla de frecuencias fijas: el núcleo elige el divisor (y la tabla de las bases lentas).
 
     specification.couplings = { Dso::Coupling::DC, Dso::Coupling::AC, Dso::Coupling::GND };
     // Sin esto el panel de tensión solo ofrece DC (la opción existe para el 6022, que no tiene AC).
     specification.hasACcoupling = true;
-    specification.triggerModes = {
-        Dso::TriggerMode::AUTO,
-        Dso::TriggerMode::NORMAL,
-        Dso::TriggerMode::SINGLE,
-    }; // no ROLL mode support (ported control class doesn't implement it)
-
-    specification.fixedUSBinLength = 0;
-    specification.hasCalibrationEEPROM = false; // DSO-5200 has no such EEPROM; limits come from CONTROL_GETLIMITS
-    specification.calfreqSteps.clear();         // no calibration-frequency generator on this device
+    // El núcleo solo ofrece AUTO (dispara o, si no llega flanco, fuerza la captura).
+    specification.triggerModes = { Dso::TriggerMode::AUTO };
 }
 
 // VID/PID confirmed against real hardware (dso5200basic/src/usb/finddevice.cpp): the product ID

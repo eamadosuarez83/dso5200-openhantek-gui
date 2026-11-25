@@ -31,7 +31,7 @@ class DsoSettings {
     bool exportProcessedSamples = true;      ///< Used for exporting
     bool alwaysSave = true;                  ///< Always save the settings on exit
     unsigned configVersion = CONFIG_VERSION; ///< Handle incompatible changes
-    const QString deviceName;                ///< the human readable device name, e.g. DSO-6022BE
+    const QString deviceName;                ///< the human readable device name, e.g. DSO-5200A
     const QString deviceID;                  ///< The unique serial number of EzUSB
     const unsigned deviceFW;                 ///< The FW version number (BCD)
 

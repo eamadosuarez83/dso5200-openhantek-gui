@@ -7,8 +7,6 @@
 #include <list>
 #include <string>
 
-class HantekDsoControl;
-
 /**
  * @brief Describes a device
  * This is the central class to describe a hantek compatible DSO. It contains all usb information to find
@@ -27,17 +25,15 @@ class DSOModel {
     /// The firmwareToken is the "devicename" of the pattern above.
     const QString firmwareToken;
     const QString name; ///< User visible name. Does not need internationalisation/translation.
-    /// Some EZ-USB targets (plain FX2, e.g. the DSO-5200/5200A) need a two-stage upload: a small
-    /// loader first, then the real firmware, both named "<firmwareToken>-{loader,firmware}.hex".
-    /// FX2LP targets (the 6022 family) only need the single-stage "<firmwareToken>-firmware.hex".
+    /// Plain FX2 targets (the DSO-5200/5200A) need a two-stage upload: a small loader first, then the
+    /// real firmware, both named "<firmwareToken>-{loader,firmware}.hex"; otherwise only
+    /// "<firmwareToken>-firmware.hex" is uploaded.
     const bool twoStageFirmware;
 
   protected:
     Dso::ControlSpecification specification;
 
   public:
-    /// This model may need to modify the HantekDsoControl class to work correctly
-    virtual void applyRequirements( HantekDsoControl * ) const = 0;
     DSOModel( int id, unsigned vendorID, unsigned productID, unsigned vendorIDnoFirmware, unsigned productIDnoFirmware,
               unsigned firmwareVersion, const QString &firmwareToken, const QString &name,
               const Dso::ControlSpecification &&specification, bool twoStageFirmware = false );

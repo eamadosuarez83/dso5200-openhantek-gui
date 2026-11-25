@@ -5,5 +5,5 @@ This directory contains post processing algorithms, namely
 * GraphGenerator: Applies all user settings (gain, offset, trigger point) and produces vertices,
 
 # Dependency
-* Files in this directory depend on structs in the `hantekprotocol` folder.
+* Files in this directory depend on types in `hantekprotocol/types.h`.
 * Classes in here probably depend on the user settings (../viewsetting.h, ../scopesetting.h)
